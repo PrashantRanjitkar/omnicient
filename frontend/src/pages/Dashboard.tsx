@@ -95,21 +95,11 @@ export default function Dashboard() {
         </div>
         <div className="text-right font-mono text-[11px] text-faint">
           <div>v{health?.version ?? '—'}</div>
-          <div>
-            mode:{' '}
-            <span className={health?.demo_mode ? 'text-demo' : 'text-band-medium'}>
-              {health ? (health.demo_mode ? 'DEMO' : 'LIVE') : '—'}
-            </span>
+          {/* A count, with the names on hover: listing all 36 wrapped to
+              three lines and filled the header. */}
+          <div title={health?.sources.join(', ')}>
+            {health ? `${health.sources.length} public sources` : '—'}
           </div>
-          <div>sources: {health?.sources.join(', ') ?? '—'}</div>
-          {health && !health.crawler.respect_robots && (
-            <div
-              className="text-band-medium"
-              title="robots.txt is not consulted. Instagram, Facebook and Threads publish Disallow: / — reaching them is an operator decision, and their terms of service apply independently."
-            >
-              robots: <span className="text-rejected">ignored</span>
-            </div>
-          )}
         </div>
       </header>
 
@@ -126,7 +116,7 @@ export default function Dashboard() {
 
       <section className="rounded border border-line bg-panel p-4">
         <h2 className="panel-title mb-3">New investigation</h2>
-        <SearchBar health={health} busy={busy} onStart={start} />
+        <SearchBar busy={busy} onStart={start} />
         {error && <p className="mt-3 text-[12px] text-rejected">{error}</p>}
       </section>
 

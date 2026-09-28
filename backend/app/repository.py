@@ -171,16 +171,18 @@ class Neo4jRepository:
         )
 
     def delete_investigation(self, investigation_id: str) -> None:
-        """Delete an investigation and everything discovered for it."""
+        """Delete an investigation and everything discovered for it.
+
+        One statement per kind of node, via reset_investigation. This used to
+        be one query with four chained OPTIONAL MATCHes, which multiplies the
+        rows - every entity times every evidence item times every crawl event
+        - before deleting anything. On a crawl with 3,230 evidence items that
+        ran into Neo4j's 2.7 GiB transaction limit, and the investigation
+        could not be deleted at all.
+        """
+        self.reset_investigation(investigation_id)
         self.session.run(
-            """
-            MATCH (i:Investigation {id: $id})
-            OPTIONAL MATCH (e:Entity {investigation_id: $id})
-            OPTIONAL MATCH (e)-[:HAS_SNAPSHOT]->(s:Snapshot)
-            OPTIONAL MATCH (v:Evidence {investigation_id: $id})
-            OPTIONAL MATCH (c:CrawlEvent {investigation_id: $id})
-            DETACH DELETE i, e, s, v, c
-            """,
+            "MATCH (i:Investigation {id: $id}) DETACH DELETE i",
             id=investigation_id,
         )
 

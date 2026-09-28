@@ -505,6 +505,11 @@ class InvestigationService:
             target = entities.get(link.target_key)
             if source is None or target is None:  # pragma: no cover - defensive
                 continue
+            if source.id == target.id:
+                # Two observations of one account resolve to one entity; a
+                # relationship from it to itself says nothing and would lend
+                # the account a band it never earned.
+                continue
             relationship = self._upsert_relationship(
                 investigation,
                 source,
@@ -542,6 +547,11 @@ class InvestigationService:
             source = entities.get(result.source_key)
             target = entities.get(result.target_key)
             if source is None or target is None:  # pragma: no cover - defensive
+                continue
+            if source.id == target.id:
+                # Two observations of one account resolve to one entity; a
+                # relationship from it to itself says nothing and would lend
+                # the account a band it never earned.
                 continue
             relationship = self._upsert_relationship(
                 investigation,
@@ -594,6 +604,11 @@ class InvestigationService:
                 (account, candidate.target_platform or "", candidate.target_identifier)
             )
             if source is None or target is None:  # pragma: no cover - defensive
+                continue
+            if source.id == target.id:
+                # Two observations of one account resolve to one entity; a
+                # relationship from it to itself says nothing and would lend
+                # the account a band it never earned.
                 continue
 
             relationship = self._upsert_relationship(

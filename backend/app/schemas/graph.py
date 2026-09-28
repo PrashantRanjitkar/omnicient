@@ -56,7 +56,18 @@ class GraphNode(BaseModel):
     # Strongest association attached to this node, used for node badges.
     confidence_level: ConfidenceLevel | None = None
     confidence_score: float | None = None
+    #: The node this one hangs from in the drawn tree - the neighbour it was
+    #: first reached through from the seed. None for the seed and for
+    #: anything no relationship reaches.
+    parent_id: str | None = None
+    #: Where the card goes with every entity shown.
     position: GraphPosition
+    #: Where it goes when a handle's name-only matches are folded into one
+    #: card. None for the folded members themselves; equal to ``position``
+    #: when there is nothing to fold.
+    compact_position: GraphPosition | None = None
+    #: The folded group this entity belongs to, if any.
+    group_id: str | None = None
 
 
 class GraphEdge(BaseModel):
@@ -92,6 +103,24 @@ class GraphStats(BaseModel):
     by_analyst_status: dict[str, int] = Field(default_factory=dict)
 
 
+class GraphGroup(BaseModel):
+    """Accounts that share the searched handle and nothing else, as one card.
+
+    A bare-username crawl asks every source for the handle, and on a common
+    name most of what comes back is somebody else. Drawn one card each they
+    dominate the canvas and read, from their shared line to the seed, as if
+    they belonged together. Folded, they say what they are: accounts that
+    use this name, with no other evidence yet.
+    """
+
+    id: str
+    parent_id: str
+    handle: str
+    member_ids: list[str] = Field(default_factory=list)
+    platforms: list[str] = Field(default_factory=list)
+    position: GraphPosition
+
+
 class GraphResponse(BaseModel):
     """The whole investigation graph."""
 
@@ -100,4 +129,5 @@ class GraphResponse(BaseModel):
     seed_entity_id: str | None = None
     nodes: list[GraphNode] = Field(default_factory=list)
     edges: list[GraphEdge] = Field(default_factory=list)
+    groups: list[GraphGroup] = Field(default_factory=list)
     stats: GraphStats = Field(default_factory=GraphStats)

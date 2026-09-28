@@ -243,6 +243,11 @@ export interface Relationship {
   updated_at: string
 }
 
+/** A relationship seen from one end, naming the entity at the other end. */
+export interface EntityRelationship extends Relationship {
+  counterpart: EntitySummary | null
+}
+
 export interface RelationshipDetail extends Relationship {
   source_entity: EntitySummary | null
   target_entity: EntitySummary | null
@@ -269,6 +274,23 @@ export interface GraphNode {
   analyst_note: string | null
   confidence_level: ConfidenceLevel | null
   confidence_score: number | null
+  /** The node this one hangs from in the drawn tree; null for the seed. */
+  parent_id: string | null
+  /** Where the card goes with every entity shown. */
+  position: { x: number; y: number }
+  /** Where it goes with name-only matches folded; null for folded members. */
+  compact_position: { x: number; y: number } | null
+  /** The folded group this entity belongs to, if any. */
+  group_id: string | null
+}
+
+/** Accounts that share the searched handle and nothing else, as one card. */
+export interface GraphGroup {
+  id: string
+  parent_id: string
+  handle: string
+  member_ids: string[]
+  platforms: string[]
   position: { x: number; y: number }
 }
 
@@ -313,6 +335,7 @@ export interface InvestigationGraph {
   seed_entity_id: string | null
   nodes: GraphNode[]
   edges: GraphEdge[]
+  groups: GraphGroup[]
   stats: GraphStats
 }
 
@@ -339,8 +362,14 @@ export interface GlobalStats {
 /** What the analyst typed, plus the options on the creation form. */
 export interface NewInvestigationInput {
   identifier: string
-  demo: boolean
   name?: string
+  /**
+   * Force demo mode on or off. Omitted by the interface, which has no control
+   * for it - the server's OMNICIENT_DEMO_MODE decides, and the backend
+   * already treats a missing value as "use your own setting". Kept on the
+   * type because the API still accepts it.
+   */
+  demo?: boolean
 }
 
 /** Client-side graph filter state. */

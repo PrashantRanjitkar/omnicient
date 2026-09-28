@@ -265,3 +265,155 @@ def test_an_empty_investigation_lays_out_to_nothing() -> None:
     from app.services.graph import GraphService
 
     assert GraphService._layout(nx.Graph(), []) == {}
+
+
+# ---------------------------------------------------------------------------
+# Compact layout
+# ---------------------------------------------------------------------------
+
+
+def _star(leaves: int, organizations: int = 0):
+    """A seed with ``leaves`` accounts and ``organizations`` hanging off it."""
+    import networkx as nx
+
+    from app.models.entity import Entity
+
+    seed = Entity("inv", "username", "seed", "seed", type=EntityType.USERNAME, is_seed=True)
+    accounts = [Entity("inv", f"site{i}", f"a{i}", f"a{i}") for i in range(leaves)]
+    orgs = [
+        Entity("inv", "organization", f"o{i}", f"o{i}", type=EntityType.ORGANIZATION)
+        for i in range(organizations)
+    ]
+    graph = nx.Graph()
+    for entity in [seed, *accounts, *orgs]:
+        graph.add_node(entity.id)
+    for entity in [*accounts, *orgs]:
+        graph.add_edge(seed.id, entity.id, weight=10.0, observed=False)
+    return seed, accounts, orgs, graph
+
+
+def _width(positions: dict, ids) -> float:
+    xs = [positions[i]["x"] for i in ids]
+    return max(xs) - min(xs)
+
+
+def test_undrawn_organizations_take_no_room() -> None:
+    """The canvas never draws organizations, so they must not space it out.
+
+    Laid out like any other node, eight organizations from one Facebook
+    Intro reserved eight columns of empty space and pushed the accounts that
+    were drawn nearly two thousand pixels apart.
+    """
+    seed, accounts, _, graph = _star(leaves=4)
+    plain = GraphService._layout(graph, [seed, *accounts])
+    plain_width = _width(plain, [seed.id, *(a.id for a in accounts)])
+
+    seed, accounts, orgs, graph = _star(leaves=4, organizations=8)
+    crowded = GraphService._layout(graph, [seed, *accounts, *orgs])
+
+    drawn = [seed.id, *(a.id for a in accounts)]
+    assert _width(crowded, drawn) == plain_width
+    # And they are still given a position, below everything that is drawn.
+    lowest = max(crowded[i]["y"] for i in drawn)
+    assert all(crowded[o.id]["y"] > lowest for o in orgs)
+
+
+def test_a_wide_fan_out_wraps_instead_of_forming_a_strip() -> None:
+    """A bare handle asks every source about itself, so the seed can have two
+    dozen children. In one row they made a strip thousands of pixels wide
+    that could only be fitted on screen by zooming out until nothing was
+    legible."""
+    from app.services.graph import MAX_GRID_COLUMNS, NODE_GAP
+
+    seed, accounts, _, graph = _star(leaves=26)
+    positions = GraphService._layout(graph, [seed, *accounts])
+
+    assert _width(positions, (a.id for a in accounts)) <= (MAX_GRID_COLUMNS - 1) * NODE_GAP
+    assert len({positions[a.id]["y"] for a in accounts}) > 1, "should wrap into rows"
+
+
+async def test_the_tree_follows_the_links_the_crawl_followed(repo, investigation) -> None:
+    """Each card hangs from the one it was actually found through.
+
+    GitHub @alice-security was reached through the personal website the seed
+    links to. A shortest-path tree over every relationship hung it straight
+    off the seed through a scored match instead, and drew the link that
+    really led to it as a line running sideways through the row.
+    """
+    graph = GraphService(repo).build(investigation)
+    by_id = {node.id: node for node in graph.nodes}
+    github = next(n for n in graph.nodes if n.platform == "github")
+    seed = next(n for n in graph.nodes if n.is_seed)
+
+    assert seed.parent_id is None
+    assert github.parent_id is not None
+    assert by_id[github.parent_id].type == "WEBSITE"
+    assert by_id[github.parent_id].identifier == "alice.dev"
+
+
+# ---------------------------------------------------------------------------
+# Folding a handle's name-only matches
+# ---------------------------------------------------------------------------
+
+
+def _handle_search(scores: dict[str, float], seed_type=EntityType.USERNAME):
+    """A handle seed and the accounts searching for it found, scored as given."""
+    from app.models.entity import Entity
+    from app.models.relationship import Relationship
+
+    seed = Entity("inv", "username", "mrbeast", "mrbeast", type=seed_type, is_seed=True)
+    accounts = {name: Entity("inv", name, "@mrbeast", "mrbeast") for name in scores}
+    relationships = [
+        Relationship("inv", seed.id, account.id, RelationshipType.USES_USERNAME,
+                     confidence_score=scores[name])
+        for name, account in accounts.items()
+    ]
+    entities = [seed, *accounts.values()]
+    graph = GraphService._networkx_graph(entities, relationships)
+    parents = GraphService._spanning_tree(graph, entities)[2]
+    best = GraphService._best_confidence(relationships)
+    return seed, accounts, entities, relationships, parents, best
+
+
+def test_name_only_matches_of_a_handle_fold_into_one_group() -> None:
+    seed, accounts, entities, relationships, parents, best = _handle_search(
+        {"chess": 10, "steam": 10, "duolingo": 10, "github": 45, "youtube": 70}
+    )
+
+    group = GraphService._name_only_group(entities, relationships, parents, best)
+
+    assert group is not None
+    seed_id, members = group
+    assert seed_id == seed.id
+    # Only the ones with nothing but the name; the evidenced ones stay cards.
+    assert set(members) == {accounts[n].id for n in ("chess", "steam", "duolingo")}
+
+
+def test_too_few_name_only_matches_are_left_as_cards() -> None:
+    _, _, entities, relationships, parents, best = _handle_search(
+        {"chess": 10, "steam": 10, "github": 45}
+    )
+
+    assert GraphService._name_only_group(entities, relationships, parents, best) is None
+
+
+def test_an_account_somebody_ruled_on_is_never_folded_away() -> None:
+    """A decision an analyst made has to stay where they can see it."""
+    _, accounts, entities, relationships, parents, best = _handle_search(
+        {"chess": 10, "steam": 10, "duolingo": 10, "lichess": 10}
+    )
+    ruled = next(r for r in relationships if r.target_entity_id == accounts["chess"].id)
+    ruled.analyst_status = "REJECTED"
+
+    _, members = GraphService._name_only_group(entities, relationships, parents, best)
+
+    assert accounts["chess"].id not in members
+
+
+def test_only_a_bare_handle_seed_is_folded() -> None:
+    """An investigation started from an account did not search by name."""
+    _, _, entities, relationships, parents, best = _handle_search(
+        {"chess": 10, "steam": 10, "duolingo": 10}, seed_type=EntityType.ACCOUNT
+    )
+
+    assert GraphService._name_only_group(entities, relationships, parents, best) is None

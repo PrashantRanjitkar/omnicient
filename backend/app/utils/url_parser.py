@@ -22,6 +22,9 @@ from .normalization import (
     normalize_username,
 )
 
+#: A YouTube channel id: stable, case-sensitive, and not a handle.
+CHANNEL_ID_RE = re.compile(r"UC[\w-]{20,}")
+
 # Path segments that prefix an account identifier rather than being one.
 PROFILE_PATH_PREFIXES: dict[str, tuple[str, ...]] = {
     "reddit": ("u", "user"),
@@ -42,6 +45,20 @@ PROFILE_PATH_PREFIXES: dict[str, tuple[str, ...]] = {
     "lobsters": ("u",),
     # lichess.org/@/thibault - the sigil is its own path segment here.
     "lichess": ("@",),
+}
+
+#: Reserved segments that belong to one platform rather than to every site.
+#:
+#: Kept separate from RESERVED_PATHS because that set is global: adding
+#: "music" or "live" there would refuse a perfectly good handle on GitHub. A
+#: platform's own reserved words only reserve that platform's namespace.
+PLATFORM_RESERVED_PATHS: dict[str, frozenset[str]] = {
+    "youtube": frozenset(
+        {
+            "results", "playlist", "shorts", "live", "gaming", "music",
+            "premium", "creators", "account", "oembed", "redirect",
+        }
+    ),
 }
 
 #: Platforms whose profile URLs *always* carry the prefix above.  Without this,
@@ -66,6 +83,39 @@ PROFILE_PATH_REQUIRED: frozenset[str] = frozenset(
 #: account named after the video id, which is how a link-in-bio page full of
 #: songs became a page full of people.
 CONTENT_ONLY_HOSTS: frozenset[str] = frozenset({"youtu.be", "redd.it", "fb.me"})
+
+#: Hosts whose pages are never somebody's own website, however often they are
+#: linked from a profile: shops, app stores, and short links that hide where
+#: they lead. A creator's Linktree lists merchandise on Amazon; that says what
+#: they sell, not who they are, and following it turned one product link into
+#: twenty "websites" read off Amazon's footer - amazon.jobs, AWS, Audible,
+#: Goodreads. Matched on the host and its parent domains.
+NOT_OWN_SITE_HOSTS: frozenset[str] = frozenset(
+    {
+        # shops
+        "amzn.to", "amzn.eu", "a.co", "amzlink.to", "etsy.com", "walmart.com",
+        "target.com", "bestbuy.com", "aliexpress.com", "shein.com",
+        # app stores
+        "apps.apple.com", "play.google.com",
+        # short and "smart" links
+        "bit.ly", "tinyurl.com", "t.co", "ow.ly", "buff.ly", "geni.us", "lnk.to",
+    }
+)
+#: Marketplaces that run a site per country: amazon.com, amazon.co.uk,
+#: amazon.com.be ... all one shop.
+NOT_OWN_SITE_BRANDS = re.compile(r"(^|\.)(amazon|ebay)\.[a-z]{2,3}(\.[a-z]{2})?$")
+
+
+def is_third_party_page(url: str | None) -> bool:
+    """Whether a link points at a shop, store or short link rather than a site."""
+    if not url:
+        return False
+    host = (urlparse(url if "://" in url else f"https://{url}").netloc or "").lower()
+    host = host.split(":")[0].removeprefix("www.")
+    if NOT_OWN_SITE_BRANDS.search(host):
+        return True
+    parts = host.split(".")
+    return any(".".join(parts[i:]) in NOT_OWN_SITE_HOSTS for i in range(len(parts) - 1))
 
 #: Platforms that mark a handle with a sigil instead of a path prefix.
 #:
@@ -246,10 +296,18 @@ def parse_profile_url(url: str | None) -> tuple[str, str] | None:
         # The prefix is mandatory for this platform, so this is some other
         # kind of page - not an account.
         return None
-    elif first in RESERVED_PATHS:
+    elif first in RESERVED_PATHS or first in PLATFORM_RESERVED_PATHS.get(
+        platform, frozenset()
+    ):
         return None
     else:
         raw = segments[0]
+
+    # A YouTube channel id is not a handle: it is case-sensitive, and folding
+    # it to lowercase produces a string that resolves to nothing. Returned as
+    # observed, and the adapter builds /channel/<id> rather than /@<id> for it.
+    if platform == "youtube" and CHANNEL_ID_RE.fullmatch(raw):
+        return platform, raw
 
     try:
         return platform, normalize_username(raw.lstrip("~"))
@@ -406,6 +464,8 @@ def extract_websites(text: str | None = None, links: list[str] | None = None) ->
     for url in list(links or []) + extract_urls(text):
         normalized = normalize_url(url)
         if not normalized or detect_platform(normalized) is not None:
+            continue
+        if is_third_party_page(normalized):
             continue
         if normalized not in websites:
             websites.append(normalized)

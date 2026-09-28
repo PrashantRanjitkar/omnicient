@@ -45,7 +45,7 @@ class RelationshipType(StrEnum):
 RELATIONSHIP_LABELS: dict[str, str] = {
     RelationshipType.LINKS_TO: "Links To",
     RelationshipType.REFERENCES: "References",
-    RelationshipType.USES_USERNAME: "Uses Username",
+    RelationshipType.USES_USERNAME: "Same name",
     RelationshipType.SHARED_WEBSITE: "Shared Website",
     RelationshipType.SHARED_EMAIL: "Shared Email",
     RelationshipType.SHARED_AVATAR: "Shared Avatar",

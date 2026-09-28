@@ -66,23 +66,10 @@ export const ENTITY_LABEL: Record<string, string> = {
   USERNAME: 'Usernames',
 }
 
-export const RELATIONSHIP_TYPES: RelationshipType[] = [
-  'LINKS_TO',
-  'REFERENCES',
-  'POTENTIAL_SAME_IDENTITY',
-  'POTENTIAL_ALIAS',
-  'SHARED_WEBSITE',
-  'SHARED_EMAIL',
-  'SHARED_AVATAR',
-  'SHARED_ATTRIBUTE',
-  'USES_USERNAME',
-  'CONTRADICTORY',
-]
-
 export const RELATIONSHIP_LABEL: Record<RelationshipType, string> = {
   LINKS_TO: 'Links To',
   REFERENCES: 'References',
-  USES_USERNAME: 'Uses Username',
+  USES_USERNAME: 'Same name',
   SHARED_WEBSITE: 'Shared Website',
   SHARED_EMAIL: 'Shared Email',
   SHARED_AVATAR: 'Shared Avatar',
@@ -134,14 +121,6 @@ export function formatDay(value: string | null | undefined): string {
   return new Date(value).toLocaleDateString(undefined, {
     month: 'short',
     day: 'numeric',
-  })
-}
-
-export function formatTime(value: string): string {
-  return new Date(value).toLocaleTimeString(undefined, {
-    hour: '2-digit',
-    minute: '2-digit',
-    second: '2-digit',
   })
 }
 
@@ -235,7 +214,3 @@ export const REASON_LABEL: Record<string, string> = {
  */
 export const ASSERTED_COLOR = 'var(--color-asserted)'
 
-export const ORIGIN_LABEL: Record<string, string> = {
-  ENGINE: 'Derived from evidence',
-  ANALYST: 'Asserted by an analyst',
-}

@@ -85,7 +85,7 @@ export default function Investigation({ view }: Props) {
    * a fresh investigation drew one edge out of sixty-one. They are drawn
    * dashed and faint, which says "proposed" without asserting it.
    */
-  const [showCandidates, setShowCandidates] = useState(true)
+  const [showAllConnections, setShowAllConnections] = useState(false)
   // A pending link: two entity ids the analyst dragged together.
   const [pendingLink, setPendingLink] = useState<[string, string] | null>(null)
   const [linkError, setLinkError] = useState<string | null>(null)
@@ -348,7 +348,7 @@ export default function Investigation({ view }: Props) {
               <InvestigationGraph
                 graph={graph}
                 filters={filters}
-                showCandidates={showCandidates}
+                showAllConnections={showAllConnections}
                 onConnectRequest={(source, target) => {
                   setLinkError(null)
                   setPendingLink([source, target])
@@ -390,19 +390,19 @@ export default function Investigation({ view }: Props) {
           {view === 'graph' && graph && graph.nodes.length > 0 && (
             <div className="absolute right-3 top-3 z-10 flex items-center gap-2">
               <button
-                onClick={() => setShowCandidates((value) => !value)}
+                onClick={() => setShowAllConnections((value) => !value)}
                 className="rounded border bg-panel/95 px-2 py-1 font-mono text-[11px]"
                 style={{
-                  borderColor: showCandidates
+                  borderColor: showAllConnections
                     ? 'var(--color-accent)'
                     : 'var(--color-line)',
-                  color: showCandidates
+                  color: showAllConnections
                     ? 'var(--color-accent)'
                     : 'var(--color-dim)',
                 }}
-                title="The engine's proposed links, which you have not ruled on yet"
+                title="Draw every connection the engine found, not just the one each card was found through"
               >
-                {showCandidates ? 'hide candidates' : 'show candidates'}
+                {showAllConnections ? 'show fewer lines' : 'show all connections'}
               </button>
               <span className="rounded border border-line bg-panel/95 px-2 py-1 font-mono text-[11px] text-faint">
                 drag one node onto another to link them

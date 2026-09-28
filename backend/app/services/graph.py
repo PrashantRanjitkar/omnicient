@@ -12,17 +12,20 @@ processing library, not a store: the source of truth stays in Neo4j.
 
 from __future__ import annotations
 
+import math
+from collections import deque
 from datetime import UTC, datetime
 
 import networkx as nx
 
 from ..models.entity import Entity
-from ..models.enums import AnalystStatus, EntityType
+from ..models.enums import AnalystStatus, EntityType, EntityVerdict
 from ..models.investigation import Investigation
 from ..models.relationship import Relationship
 from ..repository import Neo4jRepository
 from ..schemas.graph import (
     GraphEdge,
+    GraphGroup,
     GraphNode,
     GraphPosition,
     GraphResponse,
@@ -44,18 +47,36 @@ logger = get_logger(__name__)
 LEVEL_GAP = 170
 #: Horizontal distance between neighbouring cards. 185 of that is card.
 NODE_GAP = 225
-#: A level with more members than this is stepped up and down alternately.
-#: A bare handle asks two dozen sources about itself, and two dozen cards in
-#: one dead-straight row run out of screen long before they run out of
-#: content - the stagger lets the eye follow a line of them and keeps the
-#: labels from crowding, without giving up the shape of a tree.
-STAGGER_ABOVE = 6
-#: How far a stepped node moves off its level. Enough to break the line of
-#: labels, not so much that a level stops reading as one.
-STAGGER_STEP = 70
-#: Entities no relationship reaches are parked below the tree in a grid, this
-#: many to a row, rather than being hung off a root they have no edge to.
-ORPHAN_COLUMNS = 6
+#: Vertical distance between rows *within* a wrapped group of siblings. Less
+#: than LEVEL_GAP on purpose, so a wrapped group reads as one block under its
+#: parent rather than as extra hops. 109 of it is card.
+GRID_ROW_GAP = 140
+#: Siblings up to this many sit in a single row under their parent.
+SINGLE_ROW_UP_TO = 6
+#: A larger group of leaf siblings wraps into rows at most this wide. A bare
+#: handle asks every source about itself, so the seed can have two dozen
+#: children; laid out in one row they made a strip thousands of pixels wide
+#: that the canvas could only fit by zooming out until nothing was legible.
+#: Kept narrow because the canvas between the two side panels is roughly
+#: square, and a wide drawing can only be fitted to it by shrinking it.
+MAX_GRID_COLUMNS = 5
+#: Once the blocks under one parent are wider than this, the next block
+#: starts a new band underneath instead of extending the row sideways.
+MAX_ROW_WIDTH = 1600
+#: Entity types the canvas never draws. They are left out of the layout
+#: entirely: laid out but invisible, eight organizations from one Facebook
+#: Intro reserved eight columns of empty space and pushed the accounts that
+#: *were* drawn nearly two thousand pixels apart.
+UNDRAWN_TYPES = frozenset({EntityType.ORGANIZATION})
+#: Relationships read directly off a page rather than inferred.
+OBSERVED_TYPES = frozenset({"LINKS_TO", "REFERENCES"})
+#: Below this score, an account found by searching for the handle has little
+#: beyond the shared name: the handle match alone is worth 10, a matching
+#: display name 5 more. Anything with a real signal - a photograph, a link,
+#: a website - clears it.
+NAME_ONLY_BELOW = 20
+#: Name-only matches fold into one card once there are at least this many.
+GROUP_AT_LEAST = 3
 
 
 class GraphService:
@@ -72,7 +93,34 @@ class GraphService:
 
         graph = self._networkx_graph(entities, relationships)
         positions = self._layout(graph, entities)
+        parents = self._spanning_tree(graph, entities)[2] if entities else {}
         best = self._best_confidence(relationships)
+
+        # The compact layout folds a handle's name-only matches into one
+        # card. It is laid out with a single member standing in for the
+        # group, so the group takes exactly one card's room.
+        group = self._name_only_group(entities, relationships, parents, best)
+        compact = positions
+        groups: list[GraphGroup] = []
+        members: set[str] = set()
+        if group is not None:
+            seed_id, member_ids = group
+            members = set(member_ids)
+            stand_in = member_ids[0]
+            kept = [e for e in entities if e.id not in members or e.id == stand_in]
+            compact = self._layout(graph.subgraph(e.id for e in kept), kept)
+            by_id = {e.id: e for e in entities}
+            seed_entity = by_id[seed_id]
+            groups.append(
+                GraphGroup(
+                    id=f"group:{seed_id}:name-only",
+                    parent_id=seed_id,
+                    handle=seed_entity.identifier,
+                    member_ids=member_ids,
+                    platforms=sorted({platform_label(by_id[m].platform) for m in member_ids}),
+                    position=GraphPosition(**compact[stand_in]),
+                )
+            )
 
         nodes = [
             GraphNode(
@@ -94,7 +142,12 @@ class GraphService:
                 analyst_note=entity.analyst_note,
                 confidence_level=best.get(entity.id, (None, None))[0],
                 confidence_score=best.get(entity.id, (None, None))[1],
+                parent_id=parents.get(entity.id),
                 position=GraphPosition(**positions[entity.id]),
+                compact_position=(
+                    None if entity.id in members else GraphPosition(**compact[entity.id])
+                ),
+                group_id=groups[0].id if entity.id in members else None,
             )
             for entity in entities
         ]
@@ -124,6 +177,7 @@ class GraphService:
             seed_entity_id=seed,
             nodes=nodes,
             edges=edges,
+            groups=groups,
             stats=self._stats(entities, relationships, evidence_counts),
         )
         logger.info(
@@ -145,157 +199,266 @@ class GraphService:
         for entity in entities:
             graph.add_node(entity.id, depth=entity.depth, type=entity.type)
         for relationship in relationships:
-            if graph.has_node(relationship.source_entity_id) and graph.has_node(
-                relationship.target_entity_id
-            ):
+            source = relationship.source_entity_id
+            target = relationship.target_entity_id
+            if not (graph.has_node(source) and graph.has_node(target)):
+                continue
+            # One edge per pair; remember whether any relationship between
+            # them was read off a page, which is how the drawn tree follows
+            # the path the crawl actually took.
+            observed = str(relationship.relationship_type) in OBSERVED_TYPES
+            if graph.has_edge(source, target):
+                graph.edges[source, target]["observed"] |= observed
+            else:
                 graph.add_edge(
-                    relationship.source_entity_id,
-                    relationship.target_entity_id,
+                    source,
+                    target,
                     weight=max(relationship.confidence_score, 1.0),
+                    observed=observed,
                 )
         return graph
 
     @staticmethod
+    def _name_only_group(
+        entities: list[Entity],
+        relationships: list[Relationship],
+        parents: dict[str, str],
+        best: dict[str, tuple[str, float]],
+    ) -> tuple[str, list[str]] | None:
+        """The accounts a bare-username seed found that have nothing but the name.
+
+        Only for a seed that is a bare handle - an investigation started from
+        an account or a URL did not search every source by name. A member has
+        to hang directly off the handle, lead nowhere itself, score below
+        NAME_ONLY_BELOW, and have no human decision on it: an account somebody
+        confirmed, linked by hand or ruled on is never folded out of sight.
+        """
+        seed = next((e for e in entities if e.is_seed), None)
+        if seed is None or str(seed.type) != EntityType.USERNAME:
+            return None
+
+        leads = set(parents.values())
+        decided: set[str] = set()
+        for relationship in relationships:
+            if (
+                relationship.analyst_status != AnalystStatus.UNREVIEWED
+                or str(relationship.origin) == "ANALYST"
+            ):
+                decided.update(
+                    (relationship.source_entity_id, relationship.target_entity_id)
+                )
+
+        member_ids = sorted(
+            e.id
+            for e in entities
+            if parents.get(e.id) == seed.id
+            and e.id not in leads
+            and e.id not in decided
+            and str(e.type) not in UNDRAWN_TYPES
+            and str(e.analyst_verdict) == EntityVerdict.UNREVIEWED
+            and best.get(e.id, (None, 0.0))[1] < NAME_ONLY_BELOW
+        )
+        if len(member_ids) < GROUP_AT_LEAST:
+            return None
+        return seed.id, member_ids
+
+    @staticmethod
+    def _spanning_tree(
+        graph: nx.Graph, entities: list[Entity]
+    ) -> tuple[nx.Graph, str, dict[str, str]]:
+        """The tree the canvas is drawn as: each node and the one it hangs from.
+
+        A node's parent is the neighbour it was first reached through from
+        the seed, over the entities the canvas actually draws. The layout
+        places cards by it, and the canvas uses it to decide which one line
+        per card to draw by default - without that, an account found by name
+        on twenty sites draws a line to every one of the others, and the
+        picture becomes a web nobody can follow.
+        """
+        drawn_ids = {e.id for e in entities if str(e.type) not in UNDRAWN_TYPES}
+        view = graph.subgraph(n for n in graph.nodes if n in drawn_ids)
+        pool = [e for e in entities if e.id in drawn_ids] or entities
+
+        def rank(node_id: str) -> tuple:
+            degree = view.degree(node_id) if view.has_node(node_id) else 0
+            return (-degree, node_id)
+
+        root = next(
+            (e.id for e in pool if e.is_seed),
+            # No seed recorded: the busiest node is the closest thing to one.
+            min((e.id for e in pool), key=rank),
+        )
+
+        def neighbours(node_id: str, observed_only: bool) -> list[str]:
+            found = [
+                other
+                for other in view.neighbors(node_id)
+                if not observed_only or view.edges[node_id, other].get("observed")
+            ]
+            return sorted(found, key=rank)
+
+        # Two passes. First only links read off a page - "this profile links
+        # to that site, which links to that account" - so the tree shows how
+        # each card was actually reached. Then everything else, for accounts
+        # no link leads to, attached to the nearest card already placed.
+        #
+        # A single shortest-path pass over every relationship hung a GitHub
+        # account straight off the seed through a scored match, and drew the
+        # link that really led to it - from the personal website - as a line
+        # running sideways through the row.
+        parent: dict[str, str] = {}
+        if view.has_node(root):
+            reached = [root]
+            seen = {root}
+            for observed_only in (True, False):
+                queue = deque(reached)
+                while queue:
+                    node_id = queue.popleft()
+                    for other in neighbours(node_id, observed_only):
+                        if other in seen:
+                            continue
+                        seen.add(other)
+                        parent[other] = node_id
+                        reached.append(other)
+                        queue.append(other)
+        return view, root, parent
+
+    @staticmethod
     def _layout(graph: nx.Graph, entities: list[Entity]) -> dict[str, dict[str, float]]:
-        """Tidy tree: the seed on top, each hop a level below the one before.
+        """Compact tree: the seed on top, what it led to underneath.
 
-        An investigation is a rooted, shallow thing - a starting handle and
-        what was found from it - and a tree says that directly: the seed is
-        the thing at the top, every card below it was reached from the card
-        above, and depth reads down the screen.
+        Each node sits centred over what was reached through it, so a branch
+        reads as one shape and depth reads down the screen. Two rules keep it
+        compact:
 
-        Levels are hop distance from the seed, not crawl depth. They usually
-        agree, but a bare handle asks every source about itself at depth
-        zero, so depth alone would put the seed shoulder to shoulder with the
-        two dozen accounts it found.
+        - Only what the canvas draws takes up space. Organizations are never
+          drawn, so they are laid out separately where they cannot push the
+          visible cards apart.
+        - A parent with many leaf children wraps them into a block of rows,
+          at most MAX_GRID_COLUMNS wide, instead of one endless strip.
 
-        Each node sits centred over its children, so a branch reads as one
-        shape and a parent is always findable from the cards under it. The
-        cost of a tree is width - a wide fan-out is a wide row, which is what
-        the radial layout this replaces was avoiding - so a crowded level is
-        stepped alternately up and down, which keeps the labels apart and
-        lets the cards sit closer together than a dead-straight row allows.
+        Levels are hop distance from the seed, not crawl depth: a bare handle
+        asks every source about itself at depth zero, so depth alone would
+        put the seed shoulder to shoulder with everything it found.
         """
         if not entities:
             return {}
 
-        by_id = {entity.id: entity for entity in entities}
-        root = next(
-            (entity.id for entity in entities if entity.is_seed),
-            # No seed recorded: the busiest node is the closest thing to one.
-            max(
-                (entity.id for entity in entities),
-                key=lambda node_id: (
-                    graph.degree(node_id) if graph.has_node(node_id) else 0
-                ),
-            ),
-        )
-
-        # Hop distance from the seed, and the neighbour each node was reached
-        # through - which is what makes the parent-child structure a tree.
-        hops: dict[str, int] = {root: 0}
-        parent: dict[str, str] = {}
-        if graph.has_node(root):
-            for node_id, path in nx.single_source_shortest_path(graph, root).items():
-                hops[node_id] = len(path) - 1
-                if len(path) > 1:
-                    parent[node_id] = path[-2]
+        view, root, parent = GraphService._spanning_tree(graph, entities)
+        drawn = [e for e in entities if str(e.type) not in UNDRAWN_TYPES]
 
         def rank(node_id: str) -> tuple:
             """Deterministic sibling order: busiest first, then by id."""
-            degree = graph.degree(node_id) if graph.has_node(node_id) else 0
+            degree = view.degree(node_id) if view.has_node(node_id) else 0
             return (-degree, node_id)
 
         children: dict[str, list[str]] = {}
         for node_id, mother in parent.items():
-            if node_id in by_id:
-                children.setdefault(mother, []).append(node_id)
+            children.setdefault(mother, []).append(node_id)
         for siblings in children.values():
             siblings.sort(key=rank)
 
-        # Post-order walk, iteratively: a leaf takes the next free column, a
-        # parent centres itself over the children already placed. Recursion
-        # would be fine at the depths a crawl reaches, but the traversal is
-        # the part worth being explicit about.
-        columns: dict[str, float] = {}
-        cursor = 0.0
-        stack: list[tuple[str, bool]] = [(root, False)]
-        seen: set[str] = set()
-        while stack:
-            node_id, expanded = stack.pop()
+        def grid(count: int) -> int:
+            """How many columns a group of leaf siblings should use."""
+            if count <= SINGLE_ROW_UP_TO:
+                return count
+            return min(MAX_GRID_COLUMNS, max(4, math.ceil(math.sqrt(count * 0.8))))
+
+        def place(node_id: str) -> tuple[dict[str, tuple[float, float]], float]:
+            """Lay out one subtree.
+
+            Returns positions relative to the subtree (x from its leftmost
+            card centre, y from its root) and its span: the distance between
+            its leftmost and rightmost card centres.
+            """
             kids = children.get(node_id, [])
             if not kids:
-                columns[node_id] = cursor
-                cursor += NODE_GAP
-                continue
-            if not expanded:
-                if node_id in seen:
-                    continue
-                seen.add(node_id)
-                stack.append((node_id, True))
-                # Reversed so the sorted order comes off the stack intact.
-                stack.extend((kid, False) for kid in reversed(kids))
-                continue
-            placed = [columns[kid] for kid in kids if kid in columns]
-            columns[node_id] = (
-                (min(placed) + max(placed)) / 2 if placed else cursor
-            )
+                return {node_id: (0.0, 0.0)}, 0.0
 
-        # Step crowded levels so a wide fan-out stays readable.
-        levels: dict[int, list[str]] = {}
-        for node_id in columns:
-            levels.setdefault(hops.get(node_id, 0), []).append(node_id)
+            blocks: list[tuple[dict[str, tuple[float, float]], float]] = []
+            # Leaves first, nearest the parent, wrapped into a block if there
+            # are many; then the branches. Put the other way round, the lines
+            # to a large block of leaves had to cross every branch above it,
+            # and on a bare-handle crawl that was two dozen lines through a
+            # row of cards.
+            leaves = [kid for kid in kids if not children.get(kid)]
+            if leaves:
+                columns = grid(len(leaves))
+                span = (columns - 1) * NODE_GAP
+                cells: dict[str, tuple[float, float]] = {}
+                for index, leaf in enumerate(leaves):
+                    row, column = divmod(index, columns)
+                    in_row = min(columns, len(leaves) - row * columns)
+                    # A short last row is centred rather than left-aligned.
+                    inset = (columns - in_row) * NODE_GAP / 2
+                    cells[leaf] = (inset + column * NODE_GAP, row * GRID_ROW_GAP)
+                blocks.append((cells, span))
+            for kid in kids:
+                if children.get(kid):
+                    blocks.append(place(kid))
 
-        offsets: dict[str, float] = {}
-        stepped: set[int] = set()
-        for level, members in levels.items():
-            if level == 0 or len(members) <= STAGGER_ABOVE:
-                continue
-            stepped.add(level)
-            for index, node_id in enumerate(sorted(members, key=columns.get)):
-                offsets[node_id] = STAGGER_STEP if index % 2 else 0.0
+            # Blocks go side by side until a band is too wide, then the next
+            # band starts underneath the tallest block of the one above.
+            bands: list[list[tuple[dict[str, tuple[float, float]], float]]] = [[]]
+            width = -NODE_GAP
+            for block in blocks:
+                grow = block[1] + NODE_GAP
+                if bands[-1] and width + grow > MAX_ROW_WIDTH:
+                    bands.append([])
+                    width = -NODE_GAP
+                bands[-1].append(block)
+                width += grow
 
-        # Level baselines, accumulated rather than multiplied, because a
-        # stepped level is taller than an unstepped one. Spacing them evenly
-        # and then stepping into the gap put a dropped card 160px above the
-        # level below - closer to a stranger's child than to its own siblings.
-        baseline: dict[int, float] = {}
-        offset = 0.0
-        for level in sorted(levels):
-            baseline[level] = offset
-            offset += LEVEL_GAP + (STAGGER_STEP if level in stepped else 0.0)
+            laid: dict[str, tuple[float, float]] = {}
+            top = LEVEL_GAP
+            total = 0.0
+            for band in bands:
+                band_span = sum(span for _, span in band) + NODE_GAP * (len(band) - 1)
+                total = max(total, band_span)
+            for band in bands:
+                band_span = sum(span for _, span in band) + NODE_GAP * (len(band) - 1)
+                # Each band is centred under the parent.
+                cursor = (total - band_span) / 2
+                deepest = 0.0
+                for cells, span in band:
+                    for member, (x, y) in cells.items():
+                        laid[member] = (cursor + x, top + y)
+                        deepest = max(deepest, y)
+                    cursor += span + NODE_GAP
+                top += deepest + LEVEL_GAP
 
-        # The seed anchors the picture at the origin.
-        origin = columns.get(root, 0.0)
+            # The parent sits centred over everything reached through it.
+            laid[node_id] = (total / 2, 0.0)
+            return laid, total
+
+        tree, _ = place(root)
+        origin_x = tree[root][0]
         positions = {
-            node_id: {
-                "x": round(column - origin, 2),
-                "y": round(
-                    baseline.get(hops.get(node_id, 0), 0.0)
-                    + offsets.get(node_id, 0.0),
-                    2,
-                ),
-            }
-            for node_id, column in columns.items()
+            node_id: {"x": round(x - origin_x, 2), "y": round(y, 2)}
+            for node_id, (x, y) in tree.items()
         }
 
-        # Entities no relationship reaches are not part of the tree, and
-        # hanging them off the root would draw a parentage that does not
-        # exist. They are parked in a grid underneath it instead, which is
-        # honest about their being unattached and still puts them on screen.
-        loose = sorted(
-            (entity.id for entity in entities if entity.id not in positions),
-            key=rank,
-        )
-        if loose:
-            floor = max((point["y"] for point in positions.values()), default=0.0)
-            for index, node_id in enumerate(loose):
-                row, column = divmod(index, ORPHAN_COLUMNS)
+        def park(ids: list[str]) -> None:
+            """A centred grid underneath everything placed so far."""
+            if not ids:
+                return
+            floor = max(point["y"] for point in positions.values())
+            columns = grid(len(ids))
+            for index, node_id in enumerate(ids):
+                row, column = divmod(index, columns)
+                in_row = min(columns, len(ids) - row * columns)
                 positions[node_id] = {
-                    "x": round((column - (ORPHAN_COLUMNS - 1) / 2) * NODE_GAP, 2),
-                    "y": round(floor + LEVEL_GAP * (1.5 + row), 2),
+                    "x": round((column - (in_row - 1) / 2) * NODE_GAP, 2),
+                    "y": round(floor + LEVEL_GAP * 1.5 + row * GRID_ROW_GAP, 2),
                 }
 
+        # Drawn entities no relationship reaches are not part of the tree, and
+        # hanging them off the root would draw a parentage that does not
+        # exist. They sit in a grid underneath it instead.
+        park(sorted((e.id for e in drawn if e.id not in positions), key=rank))
+        # Undrawn ones still need a position in the payload; below everything,
+        # where they can take no room from anything visible.
+        park(sorted((e.id for e in entities if e.id not in positions), key=rank))
         return positions
 
     @staticmethod

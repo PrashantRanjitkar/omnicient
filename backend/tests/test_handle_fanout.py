@@ -257,3 +257,109 @@ async def test_the_timeline_is_not_written_twice(repo) -> None:
     duplicated = {m for m in messages if messages.count(m) > 1}
 
     assert not duplicated, f"timeline repeats: {sorted(duplicated)[:3]}"
+
+
+async def test_a_search_hit_is_recorded_as_a_handle_match_not_a_link() -> None:
+    """Finding a handle by searching for it is not the handle linking to it.
+
+    Every account a bare-username crawl finds was reached by asking a source
+    "do you have this handle?". Those hits used to fall through to the
+    explicit-link default and score +70 - the strongest evidence there is -
+    so every account sharing the name started in the High band before any
+    real evidence was looked at, and on a common handle that includes every
+    stranger who happens to use it.
+    """
+    from app.models.enums import EvidenceType, RelationshipType
+
+    seen: list[str] = []
+    crawler, fetcher = build(make_handler(seen))
+    outcome = await crawler.crawl("username", "prabhatacharya19",
+                                  include_similarity=False)
+    await fetcher.aclose()
+
+    seed = next(k for k, e in outcome.entities.items() if e.is_seed)
+    hits = [link for link in outcome.links if link.source_key == seed]
+    assert hits, "the seed search should have found accounts"
+
+    for link in hits:
+        assert link.relationship_type is RelationshipType.USES_USERNAME
+        assert link.evidence_type is EvidenceType.SAME_USERNAME
+        assert link.weight == Settings().scoring.exact_username
+        assert "not linked from anywhere" in link.description
+
+    # A link a profile really published is still an explicit link.
+    published = [link for link in outcome.links if link.source_key != seed]
+    assert any(link.evidence_type is EvidenceType.EXPLICIT_LINK for link in published)
+
+
+def test_a_handle_already_asked_for_is_not_asked_again_in_another_case() -> None:
+    """"Mrbeast" is the "mrbeast" the seed search already asked Instagram for.
+
+    Compared as typed, the variant looked new: the same account was fetched a
+    second time, and the two copies were then scored against each other.
+    """
+    from app.services.discovery import similarity_candidates
+    from app.sources.base import ObservedProfile
+
+    profile = ObservedProfile(platform="youtube", identifier="Mrbeast")
+    already = {("ACCOUNT", "instagram", "mrbeast")}
+
+    candidates = similarity_candidates(
+        profile, depth=1, platforms=("instagram",), known=already
+    )
+
+    assert not any(c.identifier.lower() == "mrbeast" for c in candidates)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://www.amazon.com/dp/B0G2RWH1M3",
+        "https://amazon.com.be/dp/B0G2RX68P5",
+        "https://r.amzlink.to/abc",
+        "https://www.ebay.de/itm/1",
+        "https://apps.apple.com/app/id1",
+        "https://bit.ly/xyz",
+    ],
+)
+def test_a_shop_or_short_link_is_not_a_website(url: str) -> None:
+    """A creator's Linktree lists merchandise on Amazon. That is what they
+    sell, not a site of theirs, and following it made one product link into
+    twenty "websites" read off Amazon's footer."""
+    from app.utils.url_parser import extract_websites
+
+    assert extract_websites(links=[url, "https://alice.dev"]) == ["https://alice.dev"]
+
+
+def test_a_crawled_sites_own_outbound_links_are_not_new_websites() -> None:
+    """A site's links out are its navigation; the accounts it links to are
+    still leads, which is how alice.dev leads to GitHub."""
+    from app.models.enums import EntityType
+    from app.services.discovery import candidates_from_profile
+    from app.sources.base import ObservedProfile, enrich_profile
+
+    site = enrich_profile(
+        ObservedProfile(
+            entity_type=EntityType.WEBSITE,
+            platform="website",
+            identifier="beastphilanthropy.org",
+            external_links=[
+                "https://www.charitynavigator.org/ein/852067214",
+                "https://github.com/alice-security",
+            ],
+        )
+    )
+
+    found = candidates_from_profile(
+        site, parent_key=("WEBSITE", "website", "x"), depth=1, from_seed=False
+    )
+    kinds = {(str(c.entity_type), c.platform) for c in found}
+
+    assert ("WEBSITE", "website") not in kinds
+    assert ("ACCOUNT", "github") in kinds
+
+    # The website an analyst started from is the subject: all its links count.
+    seeded = candidates_from_profile(
+        site, parent_key=("WEBSITE", "website", "x"), depth=0, from_seed=True
+    )
+    assert any(str(c.entity_type) == "WEBSITE" for c in seeded)

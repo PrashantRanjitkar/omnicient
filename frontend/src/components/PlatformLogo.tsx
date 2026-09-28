@@ -25,10 +25,6 @@ interface Props {
   style?: React.CSSProperties
 }
 
-export function hasPlatformLogo(platform: string): boolean {
-  return platform.toLowerCase() in PLATFORM_LOGO_PATHS
-}
-
 export default function PlatformLogo({
   platform,
   entityType,

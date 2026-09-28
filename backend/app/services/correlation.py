@@ -34,6 +34,7 @@ from ..sources.base import ObservedProfile
 from ..utils import imagehash
 from ..utils.logging import get_logger
 from ..utils.normalization import (
+    identity_key,
     is_identifying_host,
     normalize_display_name,
     normalize_location,
@@ -175,6 +176,17 @@ class CorrelationEngine:
         ]
         results: list[CorrelationResult] = []
         for first, second in combinations(accounts, 2):
+            if first.platform == second.platform and identity_key(
+                first.identifier
+            ) == identity_key(second.identifier):
+                # One account seen twice, under two spellings of its handle -
+                # searched as "mrbeast", linked elsewhere as "MrBeast". The
+                # two profiles agree on everything because they are the same
+                # page, and scoring them produced an account "matching
+                # itself": a relationship from an entity to itself, a High
+                # band earned from nothing, and evidence naming no second
+                # account because there is none.
+                continue
             source, target = self._orient(first, second)
             result = self.compare(source, target)
             if result.supporting:

@@ -40,6 +40,12 @@ export default function EntityNode({ data, selected }: NodeProps) {
    * ruling feel like a delete, and the whole point is that it is not one.
    */
   const ruledOut = node.analyst_verdict === 'DIFFERENT_IDENTITY'
+  /*
+   * A bare-username seed is the name that was searched, not an account or a
+   * person. Saying so on the card is what stops the lines hanging from it
+   * reading as "these all belong to one person".
+   */
+  const isHandle = node.is_seed && node.type === 'USERNAME'
   const accent = ruledOut
     ? 'var(--color-rejected)'
     : node.confidence_level
@@ -96,7 +102,7 @@ export default function EntityNode({ data, selected }: NodeProps) {
             title={node.platform_name}
             style={{ color: accent }}
           />
-          <span className="truncate">{node.platform_name}</span>
+          <span className="truncate">{isHandle ? 'Handle searched' : node.platform_name}</span>
         </span>
         {node.is_seed && (
           <span
@@ -130,8 +136,11 @@ export default function EntityNode({ data, selected }: NodeProps) {
             }`}
             title={node.identifier}
           >
-            {node.label}
+            {isHandle && !node.label.startsWith('@') ? `@${node.label}` : node.label}
           </div>
+          {isHandle && (
+            <div className="truncate text-[11px] text-faint">asked of every source</div>
+          )}
           {node.display_name && node.display_name !== node.label && (
             <div className="truncate text-[11px] text-faint" title={node.display_name}>
               {node.display_name}
