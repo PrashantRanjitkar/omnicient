@@ -95,7 +95,11 @@ export default function Dashboard() {
         </div>
         <div className="text-right font-mono text-[11px] text-faint">
           <div>v{health?.version ?? '—'}</div>
-          <div>sources: {health?.sources.join(', ') ?? '—'}</div>
+          {/* A count, with the names on hover: listing all 36 wrapped to
+              three lines and filled the header. */}
+          <div title={health?.sources.join(', ')}>
+            {health ? `${health.sources.length} public sources` : '—'}
+          </div>
         </div>
       </header>
 

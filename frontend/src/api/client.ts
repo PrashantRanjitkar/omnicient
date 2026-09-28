@@ -8,9 +8,9 @@
 
 import type {
   AliasList,
-  CrawlEvent,
   CrawlResult,
   EntityDetail,
+  EntityRelationship,
   EvidenceBundle,
   GlobalStats,
   Health,
@@ -111,8 +111,6 @@ export const api = {
       body: JSON.stringify(options),
     }),
 
-  getActivity: (id: string) =>
-    request<CrawlEvent[]>(`/investigations/${id}/activity`),
 
   getProfile: (id: string) =>
     request<IdentityProfile>(`/investigations/${id}/profile`),
@@ -149,7 +147,7 @@ export const api = {
   getEntity: (id: string) => request<EntityDetail>(`/entities/${id}`),
 
   getEntityRelationships: (id: string) =>
-    request<Relationship[]>(`/entities/${id}/relationships`),
+    request<EntityRelationship[]>(`/entities/${id}/relationships`),
 
   getRelationship: (id: string) =>
     request<RelationshipDetail>(`/relationships/${id}`),

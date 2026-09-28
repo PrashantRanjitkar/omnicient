@@ -61,6 +61,17 @@ class RelationshipRead(BaseModel):
         return self.origin is RelationshipOrigin.ANALYST
 
 
+
+class EntityRelationship(RelationshipRead):
+    """A relationship as seen from one of its ends, naming the other.
+
+    The entity panel listed "Shared Avatar - 35 - 3 evidence items" without
+    saying who the avatar was shared *with*, which is the only thing the row
+    is for. ``counterpart`` is the entity at the other end.
+    """
+
+    counterpart: EntitySummary | None = None
+
 class RelationshipDetail(RelationshipRead):
     """A relationship with both endpoints and every evidence item resolved."""
 

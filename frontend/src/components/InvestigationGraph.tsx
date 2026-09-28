@@ -15,6 +15,7 @@ import {
   useReactFlow,
 } from '@xyflow/react'
 import EntityNode, { type EntityNodeData } from './EntityNode'
+import NameGroupNode, { type NameGroupNodeData } from './NameGroupNode'
 import type {
   FilterState,
   InvestigationGraph as GraphPayload,
@@ -61,7 +62,12 @@ function isEstablished(edge: GraphPayload['edges'][number]): boolean {
   )
 }
 
-const nodeTypes = { entity: EntityNode }
+const nodeTypes = { entity: EntityNode, nameGroup: NameGroupNode }
+
+/** An unordered pair of node ids, so a->b and b->a are the same pair. */
+function pairKey(a: string, b: string): string {
+  return a < b ? `${a}|${b}` : `${b}|${a}`
+}
 
 /*
  * Dash patterns, shared by the canvas and the legend.
@@ -125,14 +131,16 @@ function Legend({
   shown,
   total,
   edges,
-  showCandidates,
+  showAllConnections,
+  seedIsHandle,
   open,
   onToggle,
 }: {
   shown: number
   total: number
   edges: number
-  showCandidates: boolean
+  showAllConnections: boolean
+  seedIsHandle: boolean
   open: boolean
   onToggle: () => void
 }) {
@@ -194,12 +202,10 @@ function Legend({
               <Stroke color="var(--color-dim)" width={2.5} />
               <span className="text-dim">Confirmed, or read off a page</span>
             </Key>
-            {showCandidates && (
-              <Key>
-                <Stroke color="var(--color-faint)" dash={DASH_PROPOSED} width={1} />
-                <span className="text-faint">Proposed, not yet ruled on</span>
-              </Key>
-            )}
+            <Key>
+              <Stroke color="var(--color-faint)" dash={DASH_PROPOSED} width={1} />
+              <span className="text-faint">Proposed, not yet ruled on</span>
+            </Key>
             <Key>
               <Stroke
                 color="var(--color-contradiction)"
@@ -214,8 +220,15 @@ function Legend({
             </Key>
           </ul>
 
-          <div className="mt-1.5 border-t border-line pt-1.5 font-mono text-[10px] text-faint">
-            A dashed node border means referenced, never read.
+          <div className="mt-1.5 border-t border-line pt-1.5 text-[10px] leading-snug text-dim">
+            {showAllConnections
+              ? 'Showing every connection the engine found.'
+              : 'Each card is linked to the one it was found through. Select a card to see all of its connections.'}
+            {seedIsHandle &&
+              ' Lines from the searched handle mean an account uses that name — not that it is the same person.'}
+          </div>
+          <div className="mt-1 font-mono text-[10px] text-faint">
+            A dashed card border means referenced, never read.
           </div>
           <div className="mt-1 font-mono text-[10px] text-faint">{counts}</div>
         </div>
@@ -235,7 +248,7 @@ interface Props {
    * behind - confirmed, asserted, or read straight off a page - which is the
    * right picture to export or present from.
    */
-  showCandidates: boolean
+  showAllConnections: boolean
   /** Ask to draw a link between two entities. */
   onConnectRequest: (sourceId: string, targetId: string) => void
   selectedNodeId: string | null
@@ -262,7 +275,7 @@ interface Props {
 export default function InvestigationGraph({
   graph,
   filters,
-  showCandidates,
+  showAllConnections,
   onConnectRequest,
   selectedNodeId,
   selectedEdgeId,
@@ -281,15 +294,15 @@ export default function InvestigationGraph({
    * A per-viewer convenience and nothing more, so localStorage is the right
    * home for it - but it throws outright in a private window or with site
    * data blocked, and an exception here would take the whole canvas down
-   * with it. Hence the guards, and an expanded default when it cannot be
-   * read: showing the key to someone who already knows it costs a corner of
-   * the canvas, hiding it from someone who does not costs them the meaning.
+   * with it. Hence the guards, and a folded default when it cannot be read.
    */
   const [legendOpen, setLegendOpen] = useState(() => {
     try {
-      return window.localStorage.getItem(LEGEND_KEY) !== 'closed'
+      // Folded unless the analyst opened it: open, it covered the top-left
+      // of the graph, which is where a tree's first row often sits.
+      return window.localStorage.getItem(LEGEND_KEY) === 'open'
     } catch {
-      return true
+      return false
     }
   })
 
@@ -311,14 +324,40 @@ export default function InvestigationGraph({
    * visible entities is always drawn - a line whose endpoints are both
    * present but which is hidden by a filter of its own is just confusing.
    */
+  /*
+   * Which lines to draw.
+   *
+   * By default each card gets one line: to the card it was found through
+   * (the server sends that as parent_id). Anything a person stands behind -
+   * confirmed, drawn by hand, or read straight off a page - is always drawn
+   * too. The engine's other proposals appear for the card that is selected
+   * or focused, and all of them with "show all connections".
+   *
+   * Drawing every proposal by default made large investigations unreadable:
+   * an account found by name on twenty sites is proposed as a match for
+   * each of the other nineteen, and 262 lines between 39 cards is a web in
+   * which no single connection can be followed.
+   */
+  const treePairs = useMemo(() => {
+    const pairs = new Set<string>()
+    for (const node of graph.nodes) {
+      if (node.parent_id) pairs.add(pairKey(node.id, node.parent_id))
+    }
+    return pairs
+  }, [graph.nodes])
+
+  const spotlight = focusNodeId ?? selectedNodeId
+
   const visibleEdges = useMemo(
     () =>
       graph.edges.filter((edge) => {
-        if (!isEstablished(edge) && !showCandidates) return false
         // A rejected edge is a decision, not a candidate: never redrawn.
-        return edge.analyst_status !== 'REJECTED'
+        if (edge.analyst_status === 'REJECTED') return false
+        if (showAllConnections || isEstablished(edge)) return true
+        if (treePairs.has(pairKey(edge.source, edge.target))) return true
+        return spotlight !== null && (edge.source === spotlight || edge.target === spotlight)
       }),
-    [graph.edges, showCandidates],
+    [graph.edges, showAllConnections, treePairs, spotlight],
   )
 
   /**
@@ -390,14 +429,40 @@ export default function InvestigationGraph({
     return neighbours
   }, [focusNodeId, visibleEdges])
 
-  const derivedNodes = useMemo<Node[]>(
+  /*
+   * A handle's name-only matches, folded into one card unless the analyst
+   * opened it - or is looking at one of them from the results list or a
+   * path, in which case the group opens rather than hide what they asked for.
+   */
+  const group = graph.groups?.[0] ?? null
+  const [groupOpen, setGroupOpen] = useState(false)
+  const members = useMemo(() => new Set(group?.member_ids ?? []), [group])
+  const folded =
+    group !== null &&
+    !groupOpen &&
+    !(selectedNodeId !== null && members.has(selectedNodeId)) &&
+    !(highlight ? group.member_ids.some((id) => highlight.nodeIds.has(id)) : false)
+
+  const shownIds = useMemo(
     () =>
-      graph.nodes
-        .filter((node) => visibleNodeIds.has(node.id))
+      folded
+        ? new Set([...visibleNodeIds].filter((id) => !members.has(id)))
+        : visibleNodeIds,
+    [folded, visibleNodeIds, members],
+  )
+
+  const derivedNodes = useMemo<Node[]>(
+    () => [
+      ...graph.nodes
+        .filter((node) => shownIds.has(node.id))
         .map((node) => ({
           id: node.id,
           type: 'entity',
-          position: dragged.current[node.id] ?? node.position,
+          // Folded, the cards use the layout that leaves one slot for the
+          // group; open, the layout with every card in its own place.
+          position:
+            dragged.current[node.id] ??
+            (folded ? (node.compact_position ?? node.position) : node.position),
           selected: node.id === selectedNodeId,
           data: {
             node,
@@ -407,23 +472,47 @@ export default function InvestigationGraph({
             highlighted: highlight ? highlight.nodeIds.has(node.id) : false,
           } satisfies EntityNodeData,
         })),
-    [graph.nodes, visibleNodeIds, selectedNodeId, focusNeighbours, highlight],
+      ...(folded && group && shownIds.has(group.parent_id)
+        ? [
+            {
+              id: group.id,
+              type: 'nameGroup',
+              position: dragged.current[group.id] ?? group.position,
+              data: { group } satisfies NameGroupNodeData,
+            },
+          ]
+        : []),
+    ],
+    [graph.nodes, shownIds, folded, group, selectedNodeId, focusNeighbours, highlight],
   )
 
-
-  /*
-   * Edge labels are the first thing to overwhelm this diagram. On a small
-   * graph every label is readable and worth showing; past that they overlap
-   * into noise, so only the edges an analyst has singled out keep theirs.
-   */
-  const labelEveryEdge = visibleEdges.length <= 24
+  /** The one faint line from the handle to its folded group. */
+  const groupEdge = useMemo<Edge[]>(
+    () =>
+      folded && group && shownIds.has(group.parent_id)
+        ? [
+            {
+              id: `${group.id}:line`,
+              source: group.parent_id,
+              target: group.id,
+              type: 'straight',
+              selectable: false,
+              style: {
+                stroke: 'var(--color-faint)',
+                strokeWidth: 1,
+                strokeDasharray: DASH_PROPOSED,
+                opacity: 0.6,
+              },
+            },
+          ]
+        : [],
+    [folded, group, shownIds],
+  )
 
   const derivedEdges = useMemo<Edge[]>(
-    () =>
-      visibleEdges
-        .filter(
-          (edge) => visibleNodeIds.has(edge.source) && visibleNodeIds.has(edge.target),
-        )
+    () => [
+      ...visibleEdges
+        .filter((edge) => shownIds.has(edge.source) && shownIds.has(edge.target))
         .map((edge) => {
           const contradictory =
             edge.relationship_type === 'CONTRADICTORY' || edge.contradiction_count > 0
@@ -447,16 +536,20 @@ export default function InvestigationGraph({
               : contradictory
                 ? 'var(--color-contradiction)'
                 : CONFIDENCE_COLOR[edge.confidence_level]
+          // Labels only on what the analyst is looking at. Labelling every
+          // line of a small graph stacked the labels of a row of siblings on
+          // top of each other; the key already explains colour and stroke.
           const labelled =
-            labelEveryEdge || onPath || edge.id === selectedEdgeId
+            onPath ||
+            edge.id === selectedEdgeId ||
+            (spotlight !== null && (edge.source === spotlight || edge.target === spotlight))
           return {
             id: edge.id,
             source: edge.source,
             target: edge.target,
             /*
-             * Straight, because the layout is radial: entities sit on rings
-             * around the seed, so a line between two of them is a spoke or a
-             * chord and reads as one. Orthogonal routing fought that - with
+             * Straight, because the layout is a tree: a line runs from a card
+             * down to the cards found through it and reads as one stroke. Orthogonal routing fought that - with
              * only confirmed edges drawn it was rarely visible, but once the
              * engine's proposals are on the canvas the right-angle detours
              * overlap into large rectangles that look like structure and are
@@ -524,13 +617,16 @@ export default function InvestigationGraph({
             },
           }
         }),
+      ...groupEdge,
+    ],
     [
       visibleEdges,
-      visibleNodeIds,
+      shownIds,
+      groupEdge,
       selectedEdgeId,
       focusNeighbours,
       highlight,
-      labelEveryEdge,
+      spotlight,
     ],
   )
 
@@ -540,6 +636,16 @@ export default function InvestigationGraph({
 
   useEffect(() => setNodes(derivedNodes), [derivedNodes, setNodes])
   useEffect(() => setEdges(derivedEdges), [derivedEdges, setEdges])
+
+  // Folding or opening the group swaps layouts, so the view refits.
+  const firstFold = useRef(true)
+  useEffect(() => {
+    if (firstFold.current) {
+      firstFold.current = false
+      return
+    }
+    window.setTimeout(() => fitView({ padding: 0.18, duration: 300 }), 30)
+  }, [folded, fitView])
 
   // "Reset layout" clears remembered drags and refits the viewport.
   useEffect(() => {
@@ -586,7 +692,9 @@ export default function InvestigationGraph({
       nodeTypes={nodeTypes}
       onNodesChange={handleNodesChange}
       onConnect={handleConnect}
-      onNodeClick={(_, node) => onSelectNode(node.id)}
+      onNodeClick={(_, node) =>
+        node.type === 'nameGroup' ? setGroupOpen(true) : onSelectNode(node.id)
+      }
       onEdgeClick={(_, edge) => onSelectEdge(edge.id)}
       onPaneClick={() => {
         onSelectNode(null)
@@ -629,37 +737,48 @@ export default function InvestigationGraph({
         <Panel position="bottom-center">
           <div className="mb-2 max-w-[420px] rounded-md border border-line bg-panel/95 px-3 py-2 text-center">
             <div className="panel-title">No connections drawn</div>
-            {/*
-              With proposals drawn by default this is a much rarer state than
-              it used to be, and it means something different: not "nothing is
-              confirmed yet" but "nothing was found, or a filter is hiding it
-              all". The copy has to say which.
-            */}
+            {/* Every card is drawn with at least its tree line, so an empty
+                canvas means nothing was found or a filter hides it all. */}
             <p className="mt-1 text-[11px] leading-snug text-dim">
               {graph.edges.length > 0
-                ? 'Every association is hidden by the current filters.'
+                ? 'Every connection is hidden by the current filters.'
                 : 'Nothing linked these entities to each other. You can still drag one entity onto another to draw a link yourself.'}
             </p>
-            {graph.edges.length > 0 && !showCandidates && (
-              <p className="mt-1 text-[11px] leading-snug text-faint">
-                {graph.edges.length} unreviewed{' '}
-                {graph.edges.length === 1 ? 'proposal is' : 'proposals are'}{' '}
-                hidden — use “show candidates” to see them.
-              </p>
-            )}
           </div>
         </Panel>
       )}
 
-      <Panel position="top-left">
+      <Panel position="top-left" className="flex flex-col items-start">
         <Legend
-          shown={derivedNodes.length}
+          shown={derivedNodes.filter((node) => node.type === 'entity').length}
           total={graph.nodes.length}
           edges={derivedEdges.length}
-          showCandidates={showCandidates}
+          showAllConnections={showAllConnections}
+          seedIsHandle={graph.nodes.some((n) => n.is_seed && n.type === 'USERNAME')}
           open={legendOpen}
           onToggle={() => setLegendOpen((value) => !value)}
         />
+        {group && (
+          // Under the key, where it cannot collide with the toolbar on the
+          // right - at top-centre it slid behind "show all connections".
+          <button
+            onClick={() => {
+              if (folded) {
+                setGroupOpen(true)
+                return
+              }
+              setGroupOpen(false)
+              // A selected member holds the group open; let go of it.
+              if (selectedNodeId !== null && members.has(selectedNodeId)) onSelectNode(null)
+            }}
+            className="mt-2 block rounded border border-line bg-panel/95 px-2 py-1 font-mono text-[11px] text-dim hover:text-ink"
+            title="Accounts found only because they use the same handle"
+          >
+            {folded
+              ? `show ${group.member_ids.length} name-only accounts`
+              : `fold ${group.member_ids.length} name-only accounts`}
+          </button>
+        )}
       </Panel>
 
       <MiniMap

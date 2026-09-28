@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react'
 import { api } from '../api/client'
-import type { EntityDetail, Relationship } from '../types'
+import type { EntityDetail, EntityRelationship } from '../types'
 import {
   CONFIDENCE_COLOR,
   DISCOVERY_LABEL,
@@ -143,7 +143,7 @@ export default function EntityPanel({
   onEntityChanged,
 }: Props) {
   const [entity, setEntity] = useState<EntityDetail | null>(null)
-  const [relationships, setRelationships] = useState<Relationship[]>([])
+  const [relationships, setRelationships] = useState<EntityRelationship[]>([])
   const [error, setError] = useState<string | null>(null)
 
   useEffect(() => {
@@ -321,6 +321,24 @@ export default function EntityPanel({
                       {Math.round(relationship.confidence_score)}
                     </span>
                   </div>
+                  {/* Who it connects to - the point of the row. It used to say
+                      "Shared Avatar - 3 evidence items" without naming the
+                      account the avatar was shared with. */}
+                  {relationship.counterpart && (
+                    <div className="flex min-w-0 items-center gap-1 text-[11px] text-ink">
+                      <span className="text-faint">with</span>
+                      <PlatformLogo
+                        platform={relationship.counterpart.platform}
+                        entityType={relationship.counterpart.type}
+                        size={11}
+                        className="shrink-0"
+                      />
+                      <span className="truncate">
+                        {relationship.counterpart.platform_name}{' '}
+                        <span className="font-mono">{relationship.counterpart.name}</span>
+                      </span>
+                    </div>
+                  )}
                   <div className="truncate text-[10px] text-faint">
                     {relationship.evidence_count} evidence item
                     {relationship.evidence_count === 1 ? '' : 's'}

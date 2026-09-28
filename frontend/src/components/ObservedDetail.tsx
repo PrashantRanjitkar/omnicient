@@ -71,10 +71,41 @@ function Value({ value }: { value: unknown }) {
       <ul className="space-y-0.5">
         {value.map((item, index) => (
           <li key={index} className="leading-snug">
-            {String(item)}
+            {/* Each item through Value again: a list of objects was put
+                through String() and printed "[object Object]" per line. */}
+            <Value value={item} />
           </li>
         ))}
       </ul>
+    )
+  }
+
+  if (typeof value === 'object') {
+    const record = value as Record<string, unknown>
+    // An account reference reads as the account it names.
+    if (typeof record.platform === 'string' && typeof record.identifier === 'string') {
+      const label = `${record.platform} @${record.identifier}`
+      return typeof record.url === 'string' ? (
+        <a
+          href={record.url}
+          target="_blank"
+          rel="noreferrer noopener"
+          className="font-mono text-accent hover:underline"
+        >
+          {label}
+        </a>
+      ) : (
+        <span className="font-mono">{label}</span>
+      )
+    }
+    // Anything else: its fields, compactly, rather than a type name.
+    return (
+      <span className="font-mono text-[11px]">
+        {Object.entries(record)
+          .filter(([, v]) => v !== null && v !== undefined && v !== '')
+          .map(([k, v]) => `${k}: ${typeof v === 'object' ? JSON.stringify(v) : String(v)}`)
+          .join(' · ')}
+      </span>
     )
   }
 

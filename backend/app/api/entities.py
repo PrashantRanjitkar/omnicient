@@ -8,8 +8,8 @@ from ..database import get_repository
 from ..models.entity import Entity
 from ..models.enums import EntityVerdict
 from ..repository import Neo4jRepository
-from ..schemas.entity import EntityDetail, EntityIdentityDecision, SnapshotRead
-from ..schemas.relationship import RelationshipRead
+from ..schemas.entity import EntityDetail, EntityIdentityDecision, EntitySummary, SnapshotRead
+from ..schemas.relationship import EntityRelationship
 from ..utils.logging import get_logger
 
 logger = get_logger(__name__)
@@ -43,18 +43,32 @@ def read_entity(
 
 @router.get(
     "/{entity_id}/relationships",
-    response_model=list[RelationshipRead],
+    response_model=list[EntityRelationship],
     summary="Relationships touching an entity",
 )
 def entity_relationships(
     entity_id: str, repo: Neo4jRepository = Depends(get_repository)
-) -> list[RelationshipRead]:
-    """Every relationship with this entity at either end - "expand connections"."""
+) -> list[EntityRelationship]:
+    """Every relationship with this entity at either end, naming the other end."""
     _get_entity(repo, entity_id)
     relationships = repo.attach_evidence(repo.relationships_for_entity(entity_id))
-    return [
-        RelationshipRead.model_validate(relationship) for relationship in relationships
-    ]
+    rows = []
+    for relationship in relationships:
+        other_id = (
+            relationship.target_entity_id
+            if relationship.source_entity_id == entity_id
+            else relationship.source_entity_id
+        )
+        other = repo.get_entity(other_id)
+        row = EntityRelationship.model_validate(relationship)
+        rows.append(
+            row.model_copy(
+                update={"counterpart": EntitySummary.model_validate(other) if other else None}
+            )
+        )
+    # Strongest first: the evidence worth reading before the weak leads.
+    rows.sort(key=lambda row: -row.confidence_score)
+    return rows
 
 
 @router.get(
