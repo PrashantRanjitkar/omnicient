@@ -84,6 +84,39 @@ PROFILE_PATH_REQUIRED: frozenset[str] = frozenset(
 #: songs became a page full of people.
 CONTENT_ONLY_HOSTS: frozenset[str] = frozenset({"youtu.be", "redd.it", "fb.me"})
 
+#: Hosts whose pages are never somebody's own website, however often they are
+#: linked from a profile: shops, app stores, and short links that hide where
+#: they lead. A creator's Linktree lists merchandise on Amazon; that says what
+#: they sell, not who they are, and following it turned one product link into
+#: twenty "websites" read off Amazon's footer - amazon.jobs, AWS, Audible,
+#: Goodreads. Matched on the host and its parent domains.
+NOT_OWN_SITE_HOSTS: frozenset[str] = frozenset(
+    {
+        # shops
+        "amzn.to", "amzn.eu", "a.co", "amzlink.to", "etsy.com", "walmart.com",
+        "target.com", "bestbuy.com", "aliexpress.com", "shein.com",
+        # app stores
+        "apps.apple.com", "play.google.com",
+        # short and "smart" links
+        "bit.ly", "tinyurl.com", "t.co", "ow.ly", "buff.ly", "geni.us", "lnk.to",
+    }
+)
+#: Marketplaces that run a site per country: amazon.com, amazon.co.uk,
+#: amazon.com.be ... all one shop.
+NOT_OWN_SITE_BRANDS = re.compile(r"(^|\.)(amazon|ebay)\.[a-z]{2,3}(\.[a-z]{2})?$")
+
+
+def is_third_party_page(url: str | None) -> bool:
+    """Whether a link points at a shop, store or short link rather than a site."""
+    if not url:
+        return False
+    host = (urlparse(url if "://" in url else f"https://{url}").netloc or "").lower()
+    host = host.split(":")[0].removeprefix("www.")
+    if NOT_OWN_SITE_BRANDS.search(host):
+        return True
+    parts = host.split(".")
+    return any(".".join(parts[i:]) in NOT_OWN_SITE_HOSTS for i in range(len(parts) - 1))
+
 #: Platforms that mark a handle with a sigil instead of a path prefix.
 #:
 #: ``lobste.rs/~jcs`` is a person and ``lobste.rs/s/abc`` is a story, so the
@@ -431,6 +464,8 @@ def extract_websites(text: str | None = None, links: list[str] | None = None) ->
     for url in list(links or []) + extract_urls(text):
         normalized = normalize_url(url)
         if not normalized or detect_platform(normalized) is not None:
+            continue
+        if is_third_party_page(normalized):
             continue
         if normalized not in websites:
             websites.append(normalized)

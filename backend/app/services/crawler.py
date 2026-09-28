@@ -495,6 +495,41 @@ class Crawler:
 
         parent = outcome.entities[candidate.parent_key]
         target = outcome.entities[candidate.key]
+
+        if candidate.seed_equivalent:
+            # A search hit, not a link. The seed handle was *asked of* this
+            # source and the source answered; nothing published a connection.
+            # It used to fall through to the explicit-link default below and
+            # score +70 - the strongest evidence type - for an account whose
+            # only tie to the investigation is sharing a name, which
+            # calibration measured firing on strangers too. It is recorded as
+            # what it is: an account that uses the handle, worth what a
+            # matching handle is worth.
+            handle = candidate.link_context or candidate.identifier
+            outcome.links.append(
+                ObservedLink(
+                    source_key=candidate.parent_key,
+                    target_key=candidate.key,
+                    relationship_type=RelationshipType.USES_USERNAME,
+                    evidence_type=EvidenceType.SAME_USERNAME,
+                    description=(
+                        f"{target.label} uses the handle '{handle}' - found by "
+                        f"searching {target.platform} for it, not linked from "
+                        f"anywhere. A weak lead: handles are reused."
+                    ),
+                    weight=self.settings.scoring.exact_username,
+                    source_url=target.url,
+                    extracted_value=handle,
+                )
+            )
+            self._record(
+                outcome,
+                "relationship_created",
+                f"{parent.label} -> {target.label} (USES_USERNAME)",
+                type=str(RelationshipType.USES_USERNAME),
+            )
+            return
+
         relationship_type, evidence_type, weight = self._structural_edge(target)
         outcome.links.append(
             ObservedLink(

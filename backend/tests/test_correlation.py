@@ -357,3 +357,27 @@ def test_a_profile_with_no_hash_and_no_shared_address_is_not_a_match() -> None:
     target = _profile("facebook", "b", avatar_url="https://b/y")
 
     assert _avatar_evidence(source, target) == []
+
+
+def test_one_account_seen_under_two_spellings_is_not_matched_with_itself() -> None:
+    """The @mrbeast crawl reached Scratch as "mrbeast" and again as "MrBeast".
+
+    Scored as two profiles, the account matched itself on everything - same
+    avatar, same handle - and was saved as a relationship from the entity to
+    itself: a band earned from nothing, and "same avatar" evidence that could
+    name no second account because there was none.
+    """
+    from app.services.correlation import CorrelationEngine
+    from app.sources.base import ObservedProfile
+
+    avatar = "https://cdn2.scratch.mit.edu/get_image/user/395006"
+    searched = ObservedProfile(platform="scratch", identifier="mrbeast", avatar_url=avatar)
+    linked = ObservedProfile(platform="scratch", identifier="MrBeast", avatar_url=avatar)
+    elsewhere = ObservedProfile(platform="youtube", identifier="MrBeast", avatar_url=avatar)
+
+    results = CorrelationEngine().correlate([searched, linked, elsewhere])
+
+    pairs = {frozenset((r.source_key[1:], r.target_key[1:])) for r in results}
+    assert frozenset({("scratch", "mrbeast"), ("scratch", "MrBeast")}) not in pairs
+    # Two different platforms are still compared as usual.
+    assert any(("youtube", "MrBeast") in pair for pair in pairs)

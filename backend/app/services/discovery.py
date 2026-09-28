@@ -23,7 +23,7 @@ from dataclasses import dataclass, field
 from ..models.enums import DiscoveryMethod, EntityType
 from ..sources.base import ObservedProfile
 from ..utils.logging import get_logger
-from ..utils.normalization import normalize_domain, username_variants
+from ..utils.normalization import identity_key, normalize_domain, username_variants
 from ..utils.url_parser import website_identity
 
 logger = get_logger(__name__)
@@ -252,7 +252,18 @@ def candidates_from_profile(
             )
         )
 
-    for url in profile.websites:
+    # A website's own outbound links are its navigation, not its owner's
+    # other websites. Followed as websites, a shop page's footer became
+    # twenty entities; beastphilanthropy.org's footer added Charity Navigator
+    # and Candid. The accounts a site links to are still followed above -
+    # that is the alice.dev -> GitHub pivot - and a website the analyst
+    # started from keeps all of its links, since it is the subject.
+    is_site = profile.platform == "website" or str(profile.entity_type) in (
+        EntityType.WEBSITE,
+        EntityType.DOMAIN,
+    )
+    websites = [] if is_site and not from_seed else profile.websites
+    for url in websites:
         identity = website_identity(url)
         if not identity:
             continue
@@ -323,16 +334,20 @@ def similarity_candidates(
     interface can tell an analyst that a node arrived on a weak signal, and so
     they can be filtered out entirely.
     """
-    known = known or set()
+    # Compared without case: handles are case-insensitive on every platform
+    # here. Compared as typed, "Mrbeast" was not recognised as the "mrbeast"
+    # the seed search had already asked for, so the same account was fetched
+    # a second time - and the two copies were then scored against each other.
+    seen = {(kind, platform, identity_key(handle)) for kind, platform, handle in (known or set())}
     candidates: list[Candidate] = []
     for platform in platforms:
         if platform == profile.platform:
             continue
         for variant in username_variants(profile.identifier):
-            key = (str(EntityType.ACCOUNT), platform, variant)
-            if key in known:
+            key = (str(EntityType.ACCOUNT), platform, identity_key(variant))
+            if key in seen:
                 continue
-            known.add(key)
+            seen.add(key)
             candidates.append(
                 Candidate(
                     entity_type=EntityType.ACCOUNT,
