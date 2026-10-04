@@ -252,7 +252,10 @@ class Neo4jRepository:
                 // different accounts again.
                 e.identifier = CASE WHEN $resolved THEN $identifier
                                     ELSE coalesce(e.identifier, $identifier) END,
-                e.name = CASE WHEN $resolved THEN $name
+                // An email's name is the address or its mask, and whether it
+                // is masked is decided by the latest crawl - an address a
+                // profile has since published must not stay hidden.
+                e.name = CASE WHEN $resolved OR $type = 'EMAIL' THEN $name
                               ELSE coalesce(e.name, $name) END,
                 e.url = coalesce($url, e.url),
                 e.display_name = $display_name,

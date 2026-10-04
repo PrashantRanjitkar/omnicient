@@ -171,6 +171,8 @@ export interface Entity {
   created_at: string
   updated_at: string
   metadata: Record<string, unknown>
+  activity: ActivityStatus
+  last_active: string | null
 }
 
 export interface EntityDetail extends Entity {
@@ -272,6 +274,11 @@ export interface GraphNode {
   degree: number
   analyst_verdict: EntityVerdict
   analyst_note: string | null
+  /** The label is masked: a commit author address the person never published. */
+  masked: boolean
+  /** Whether the account has done anything in public lately. Never scored. */
+  activity: ActivityStatus
+  last_active: string | null
   confidence_level: ConfidenceLevel | null
   confidence_score: number | null
   /** The node this one hangs from in the drawn tree; null for the seed. */
@@ -373,6 +380,13 @@ export interface NewInvestigationInput {
 }
 
 /** Client-side graph filter state. */
+/**
+ * ACTIVE and DORMANT need a published last-activity date; most sources only
+ * publish a creation date, so UNKNOWN is the common case and never means
+ * dormant.
+ */
+export type ActivityStatus = 'ACTIVE' | 'DORMANT' | 'UNKNOWN'
+
 export interface FilterState {
   entityTypes: Set<EntityType>
   /**
@@ -395,6 +409,8 @@ export interface FilterState {
    * when asked.
    */
   showDifferentIdentity: boolean
+  /** Activity states to keep on the canvas. The seed is always kept. */
+  activity: Set<ActivityStatus>
 }
 
 // ---------------------------------------------------------------------------
@@ -639,6 +655,9 @@ export interface SourceResult {
   relationship_id: string | null
   evidence_count: number
   contradiction_count: number
+
+  activity: ActivityStatus
+  last_active: string | null
 
   reason: string | null
   detail: string | null

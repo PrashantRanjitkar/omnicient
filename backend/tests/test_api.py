@@ -344,3 +344,14 @@ def test_alias_relationships_are_stored_as_their_own_edge_type(
         r for r in relationships if r["relationship_type"] == "POTENTIAL_ALIAS"
     )
     assert alias_edge["relationship_label"] == "Potential Alias"
+
+
+def test_an_email_address_cannot_start_an_investigation(client) -> None:
+    """Email search was removed; the analyst is told so, not "unrecognised"."""
+    for body in (
+        {"identifier": "alice@example.com"},
+        {"identifier": "alice_98", "platform": "email"},
+    ):
+        response = client.post("/api/investigations", json=body)
+        assert response.status_code == 422
+        assert "email address is not supported" in response.text

@@ -21,6 +21,7 @@ from ..models.enums import (
     RelationshipOrigin,
     RelationshipType,
 )
+from ..utils.activity import ActivityStatus
 
 
 class GraphPosition(BaseModel):
@@ -53,6 +54,14 @@ class GraphNode(BaseModel):
     #: cannot see is one they cannot un-rule.
     analyst_verdict: EntityVerdict = EntityVerdict.UNREVIEWED
     analyst_note: str | None = None
+    #: The label is a masked value the person did not publish (a commit
+    #: author address). ``identifier`` still holds it in full; the client
+    #: shows it only when the analyst asks.
+    masked: bool = False
+    #: Whether the account has done anything in public lately. Context only:
+    #: it never touches a score.
+    activity: ActivityStatus = ActivityStatus.UNKNOWN
+    last_active: datetime | None = None
     # Strongest association attached to this node, used for node badges.
     confidence_level: ConfidenceLevel | None = None
     confidence_score: float | None = None

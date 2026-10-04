@@ -1,6 +1,6 @@
 import { Handle, Position, type NodeProps } from '@xyflow/react'
 import type { GraphNode } from '../types'
-import { CONFIDENCE_COLOR, CONFIDENCE_LABEL } from '../lib/display'
+import { activityText, CONFIDENCE_COLOR, CONFIDENCE_LABEL } from '../lib/display'
 import Avatar from './Avatar'
 import PlatformLogo from './PlatformLogo'
 
@@ -134,7 +134,8 @@ export default function EntityNode({ data, selected }: NodeProps) {
             className={`truncate font-mono text-[13px] ${
               ruledOut ? 'text-dim line-through decoration-1' : 'text-ink'
             }`}
-            title={node.identifier}
+            // A masked address stays masked on hover too; the panel reveals it.
+            title={node.masked ? node.label : node.identifier}
           >
             {isHandle && !node.label.startsWith('@') ? `@${node.label}` : node.label}
           </div>
@@ -172,14 +173,21 @@ export default function EntityNode({ data, selected }: NodeProps) {
         ) : (
           <span className="font-mono text-[10px] text-faint">NO ASSOCIATION</span>
         )}
-        {!node.resolved && (
+        {!node.resolved ? (
           <span
             className="font-mono text-[9px] text-faint"
             title="Referenced publicly, but no public profile could be read"
           >
             UNRESOLVED
           </span>
-        )}
+        ) : node.activity === 'DORMANT' ? (
+          <span
+            className="font-mono text-[9px] text-faint"
+            title={activityText(node.activity, node.last_active) ?? undefined}
+          >
+            DORMANT
+          </span>
+        ) : null}
       </div>
 
       <Handle

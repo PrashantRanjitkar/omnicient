@@ -1,4 +1,4 @@
-import type { ConfidenceLevel, EntityType, FilterState } from '../types'
+import type { ActivityStatus, ConfidenceLevel, EntityType, FilterState } from '../types'
 import {
   CONFIDENCE_COLOR,
   CONFIDENCE_LABEL,
@@ -16,9 +16,17 @@ interface Props {
     unassociated: number
     /** Entities an analyst has ruled a different party. */
     differentIdentity: number
+    /** Entities per activity state. */
+    byActivity: Record<string, number>
   }
   onChange: (next: FilterState) => void
 }
+
+const ACTIVITY_ROWS: { status: ActivityStatus; label: string }[] = [
+  { status: 'ACTIVE', label: 'Active in the last two years' },
+  { status: 'DORMANT', label: 'No activity for two years' },
+  { status: 'UNKNOWN', label: 'Source does not say' },
+]
 
 function toggle<T>(set: Set<T>, value: T): Set<T> {
   const next = new Set(set)
@@ -121,6 +129,31 @@ export default function Filters({ filters, counts, onChange }: Props) {
           The band of the strongest association touching an entity.
         </p>
       </section>
+
+      {/*
+        Only when some source published an activity date. Most do not, and a
+        section where every entity sits under "does not say" filters nothing.
+      */}
+      {(counts.byActivity.ACTIVE ?? 0) + (counts.byActivity.DORMANT ?? 0) > 0 && (
+        <section>
+          <div className="panel-title mb-1">Account activity</div>
+          {ACTIVITY_ROWS.map(({ status, label }) => (
+            <Row
+              key={status}
+              label={label}
+              checked={filters.activity.has(status)}
+              count={counts.byActivity[status]}
+              onToggle={() =>
+                onChange({ ...filters, activity: toggle(filters.activity, status) })
+              }
+            />
+          ))}
+          <p className="mt-1 text-[11px] leading-snug text-faint">
+            Last public activity, where the source publishes it. Context only —
+            it never changes a score.
+          </p>
+        </section>
+      )}
 
       {/*
         Only worth a section once there is something in it. An analyst who has

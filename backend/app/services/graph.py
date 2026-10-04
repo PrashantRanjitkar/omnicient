@@ -31,6 +31,7 @@ from ..schemas.graph import (
     GraphResponse,
     GraphStats,
 )
+from ..utils.activity import activity_status, last_active
 from ..utils.logging import get_logger
 from ..utils.normalization import platform_label
 
@@ -140,6 +141,9 @@ class GraphService:
                 degree=graph.degree(entity.id) if graph.has_node(entity.id) else 0,
                 analyst_verdict=entity.analyst_verdict,
                 analyst_note=entity.analyst_note,
+                masked=bool((entity.meta or {}).get("exposed_by")),
+                activity=activity_status(entity.meta),
+                last_active=last_active(entity.meta),
                 confidence_level=best.get(entity.id, (None, None))[0],
                 confidence_score=best.get(entity.id, (None, None))[1],
                 parent_id=parents.get(entity.id),

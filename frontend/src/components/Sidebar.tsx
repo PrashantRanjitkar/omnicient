@@ -52,8 +52,10 @@ export default function Sidebar({
     const byConfidence: Record<string, number> = {}
     let unassociated = 0
     let differentIdentity = 0
+    const byActivity: Record<string, number> = {}
     for (const node of graph?.nodes ?? []) {
       if (node.analyst_verdict === 'DIFFERENT_IDENTITY') differentIdentity += 1
+      byActivity[node.activity] = (byActivity[node.activity] ?? 0) + 1
       if (node.confidence_level === null) unassociated += 1
       else byConfidence[node.confidence_level] =
         (byConfidence[node.confidence_level] ?? 0) + 1
@@ -63,6 +65,7 @@ export default function Sidebar({
       byConfidence,
       unassociated,
       differentIdentity,
+      byActivity,
     }
   }, [graph?.nodes, stats?.by_entity_type])
 

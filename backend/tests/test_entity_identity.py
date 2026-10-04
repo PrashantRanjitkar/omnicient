@@ -263,3 +263,25 @@ def test_the_constraint_can_be_created_after_healing(
 
     entity_constraint = next(c for c in CONSTRAINTS if "entity_identity_folded" in c)
     repo.session.run(entity_constraint)  # would raise if duplicates remained
+
+
+def test_an_email_name_follows_the_latest_crawl(repo, investigation) -> None:
+    """Masked when found in commits; unmasked once a profile publishes it.
+
+    Unresolved entities keep the first name on record, which would leave an
+    address masked forever after a re-run found it published.
+    """
+    def email(name: str) -> Entity:
+        return repo.upsert_entity(
+            Entity(
+                investigation_id=investigation.id,
+                platform="email",
+                type=str(EntityType.EMAIL),
+                name=name,
+                identifier="alice@hidden.dev",
+                resolved=False,
+            )
+        )
+
+    assert email("a***@hidden.dev").name == "a***@hidden.dev"
+    assert email("alice@hidden.dev").name == "alice@hidden.dev"

@@ -13,11 +13,13 @@ interesting.
 
 from __future__ import annotations
 
+from datetime import datetime
 from enum import StrEnum
 
 from pydantic import BaseModel, ConfigDict, Field, computed_field
 
 from ..models.enums import AnalystStatus, ConfidenceLevel
+from ..utils.activity import ActivityStatus
 from .entity import EntitySummary
 
 
@@ -69,6 +71,10 @@ class SourceResult(BaseModel):
     relationship_id: str | None = None
     evidence_count: int = 0
     contradiction_count: int = 0
+
+    #: When the account last did anything in public, if its source says.
+    activity: ActivityStatus = ActivityStatus.UNKNOWN
+    last_active: datetime | None = None
 
     #: Why a source was unavailable, in the analyst's words.
     reason: str | None = None

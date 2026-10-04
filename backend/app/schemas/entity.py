@@ -8,6 +8,7 @@ from typing import Any
 from pydantic import AliasChoices, BaseModel, ConfigDict, Field, computed_field
 
 from ..models.enums import DiscoveryMethod, EntityType, EntityVerdict
+from ..utils.activity import ActivityStatus, activity_status, last_active
 from ..utils.normalization import platform_label
 
 
@@ -75,6 +76,17 @@ class EntityRead(BaseModel):
     def platform_name(self) -> str:
         """Display label for the platform, e.g. ``GitHub``."""
         return platform_label(self.platform)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def activity(self) -> ActivityStatus:
+        """Active, dormant, or unknown - see :mod:`app.utils.activity`."""
+        return activity_status(self.metadata)
+
+    @computed_field  # type: ignore[prop-decorator]
+    @property
+    def last_active(self) -> datetime | None:
+        return last_active(self.metadata)
 
 
 class EntityDetail(EntityRead):

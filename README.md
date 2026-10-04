@@ -2,18 +2,20 @@
 
 **Trace public identities. Follow the evidence.**
 
-Omnicient starts from a single public identifier — a username, an email address, a profile link or a domain — and maps what else on the public web appears to belong to the same person. A matching handle on another site proves very little, since people reuse names constantly; what genuinely ties accounts together is usually what people published themselves, like a link in a bio, a personal page listing their profiles, or the same photograph used in several places. Omnicient follows those trails, scores what it finds, and shows the evidence behind every connection. It never claims two accounts belong to the same person — that judgement is left to the analyst.
+Omnicient starts from a single public identifier — a username, a profile link or a domain — and maps what else on the public web appears to belong to the same person. A matching handle on another site proves very little, since people reuse names constantly; what genuinely ties accounts together is usually what people published themselves, like a link in a bio, a personal page listing their profiles, or the same photograph used in several places. Omnicient follows those trails, scores what it finds, and shows the evidence behind every connection. It never claims two accounts belong to the same person — that judgement is left to the analyst.
 
 ## Features
 
-- **One input, no platform picker** — type a handle, email, link or domain and every relevant source is asked
+- **One input, no platform picker** — type a handle, profile link or domain and every relevant source is asked
 - **36 public sources** — GitHub, Mastodon, Bluesky, YouTube, Keybase, Linktree and more
 - **Evidence, not verdicts** — every connection lists what was observed and the page it came from
 - **Explainable scoring** — simple weighted rules, measured against labelled real-world pairs
 - **Avatar matching** — recognises the same profile photo across platforms
+- **Commit metadata** — samples a GitHub account's public commits for author addresses (masked by default) and the time zones they were made in
+- **Account activity** — flags accounts with no public activity in two years, where the source publishes it
 - **Graph view** — the investigation laid out as a tree from the starting identifier
 - **Analyst review** — confirm or reject connections, rule out namesakes, draw links by hand; nothing is ever deleted
-- **Export** — JSON and CSV
+- **Export** — a PDF case report, plus JSON and CSV
 
 ## Tech stack
 

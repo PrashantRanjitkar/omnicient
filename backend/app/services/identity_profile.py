@@ -273,7 +273,11 @@ class IdentityProfileService:
 
     def _emails(self, entities: list[Entity]) -> list[ObservedValue]:
         def values(entity: Entity):
-            if entity.type == str(EntityType.EMAIL):
+            # An address found only in commit metadata was never published,
+            # so it is not a public email reference; the graph shows it masked.
+            if entity.type == str(EntityType.EMAIL) and not (entity.meta or {}).get(
+                "exposed_by"
+            ):
                 yield entity.identifier.lower(), entity.identifier
             if entity.email:
                 yield entity.email.lower(), entity.email

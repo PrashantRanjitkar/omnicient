@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from 'react'
 import { Link } from 'react-router-dom'
 import type { InvestigationDetail } from '../types'
 import { api } from '../api/client'
@@ -102,20 +103,7 @@ export default function InvestigationHeader({
         >
           {busy ? 'Crawling…' : 'Re-run discovery'}
         </button>
-        <a
-          href={api.exportUrl(investigation.id, 'json')}
-          className="rounded border border-line px-2 py-1 text-[12px] text-dim hover:border-line-bright hover:text-ink"
-          title="Full record: entities, relationships, evidence, snapshots, timeline"
-        >
-          Export JSON
-        </a>
-        <a
-          href={api.exportUrl(investigation.id, 'csv')}
-          className="rounded border border-line px-2 py-1 text-[12px] text-dim hover:border-line-bright hover:text-ink"
-          title="One row per relationship, with its evidence"
-        >
-          Export CSV
-        </a>
+        <ExportMenu investigationId={investigation.id} />
         <Link
           to="/"
           className="rounded border border-accent/60 bg-accent/10 px-2 py-1 text-[12px] font-medium text-accent hover:bg-accent/20"
@@ -124,5 +112,71 @@ export default function InvestigationHeader({
         </Link>
       </div>
     </header>
+  )
+}
+
+const EXPORTS = [
+  {
+    format: 'pdf',
+    label: 'PDF report',
+    note: 'Readable case report: findings, evidence, decisions, method',
+  },
+  {
+    format: 'json',
+    label: 'JSON',
+    note: 'Full record: entities, relationships, evidence, snapshots, timeline',
+  },
+  { format: 'csv', label: 'CSV', note: 'One row per relationship, with its evidence' },
+] as const
+
+/**
+ * One menu for every way out of the app. The report is first because it is
+ * the one a person reads; the data exports are for tools.
+ */
+function ExportMenu({ investigationId }: { investigationId: string }) {
+  const [open, setOpen] = useState(false)
+  const root = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (!open) return
+    const close = (event: MouseEvent | KeyboardEvent) => {
+      if (event instanceof KeyboardEvent ? event.key === 'Escape' :
+          !root.current?.contains(event.target as Node)) {
+        setOpen(false)
+      }
+    }
+    document.addEventListener('mousedown', close)
+    document.addEventListener('keydown', close)
+    return () => {
+      document.removeEventListener('mousedown', close)
+      document.removeEventListener('keydown', close)
+    }
+  }, [open])
+
+  return (
+    <div ref={root} className="relative">
+      <button
+        onClick={() => setOpen((shown) => !shown)}
+        aria-expanded={open}
+        className="rounded border border-line px-2 py-1 text-[12px] text-dim hover:border-line-bright hover:text-ink"
+      >
+        Export ▾
+      </button>
+      {open && (
+        <div className="absolute right-0 z-20 mt-1 w-72 rounded border border-line bg-panel p-1 shadow-lg">
+          {EXPORTS.map(({ format, label, note }) => (
+            <a
+              key={format}
+              href={api.exportUrl(investigationId, format)}
+              onClick={() => setOpen(false)}
+              className="block rounded px-2 py-1.5 hover:bg-raised"
+            >
+              <div className="text-[12px] text-ink">{label}</div>
+              <div className="text-[11px] leading-snug text-faint">{note}</div>
+            </a>
+          ))}
+        </div>
+      )}
+    </div>
   )
 }

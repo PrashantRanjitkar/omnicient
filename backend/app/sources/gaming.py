@@ -19,6 +19,7 @@ from .base import (
     ObservedProfile,
     SourceCategory,
     XmlProfileAdapter,
+    activity_fields,
     enrich_profile,
     xml_text,
 )
@@ -127,9 +128,12 @@ class ChessComAdapter(JsonProfileAdapter):
                 external_links=[streaming] if streaming else [],
                 source=self.platform,
                 metadata={
-                    key: payload[key]
-                    for key in ("title", "followers", "joined", "status")
-                    if payload.get(key) is not None
+                    **{
+                        key: payload[key]
+                        for key in ("title", "followers", "joined", "status")
+                        if payload.get(key) is not None
+                    },
+                    **activity_fields(payload.get("last_online"), "last time online"),
                 },
             )
         )
@@ -188,9 +192,12 @@ class LichessAdapter(JsonProfileAdapter):
                 external_links=links,
                 source=self.platform,
                 metadata={
-                    key: payload[key]
-                    for key in ("title", "patron", "verified", "createdAt")
-                    if payload.get(key) is not None
+                    **{
+                        key: payload[key]
+                        for key in ("title", "patron", "verified", "createdAt")
+                        if payload.get(key) is not None
+                    },
+                    **activity_fields(payload.get("seenAt"), "last time seen online"),
                 },
             )
         )
