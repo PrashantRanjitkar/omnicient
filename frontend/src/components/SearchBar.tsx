@@ -9,8 +9,8 @@ interface Props {
 /**
  * Investigation creation.
  *
- * One input, no platform picker.  The analyst types a username, an email
- * address, a profile URL or a domain, and the backend works out which it is
+ * One input, no platform picker.  The analyst types a username, a profile
+ * URL or a domain, and the backend works out which it is
  * and which sources to ask.  Offering a platform dropdown here would push a
  * decision onto the analyst that the tool is meant to make for them.
  *
@@ -39,7 +39,7 @@ export default function SearchBar({ busy, onStart }: Props) {
     <form onSubmit={submit} className="space-y-3">
       <div className="flex flex-wrap items-end gap-3">
         <label className="min-w-[300px] flex-[2]">
-          <span className="panel-title">Username, email, profile URL, or domain</span>
+          <span className="panel-title">Username, profile URL, or domain</span>
           <input
             value={identifier}
             onChange={(event) => setIdentifier(event.target.value)}
@@ -77,7 +77,7 @@ export default function SearchBar({ busy, onStart }: Props) {
 
       {touched && !identifier.trim() && (
         <p className="text-[12px] text-rejected">
-          Enter a username, email address, profile URL or domain.
+          Enter a username, profile URL or domain.
         </p>
       )}
     </form>

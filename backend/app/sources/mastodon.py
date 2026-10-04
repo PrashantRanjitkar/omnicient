@@ -17,7 +17,7 @@ from typing import Any
 from bs4 import BeautifulSoup
 
 from ..utils.normalization import normalize_username
-from .base import JsonProfileAdapter, ObservedProfile, enrich_profile
+from .base import JsonProfileAdapter, ObservedProfile, activity_fields, enrich_profile
 
 #: Instance queried when the handle does not name one.
 DEFAULT_INSTANCE = "mastodon.social"
@@ -121,9 +121,12 @@ class MastodonAdapter(JsonProfileAdapter):
                 external_links=links,
                 source=self.platform,
                 metadata={
-                    key: payload[key]
-                    for key in ("followers_count", "statuses_count", "created_at", "bot")
-                    if payload.get(key) is not None
+                    **{
+                        key: payload[key]
+                        for key in ("followers_count", "statuses_count", "created_at", "bot")
+                        if payload.get(key) is not None
+                    },
+                    **activity_fields(payload.get("last_status_at"), "date of the latest post"),
                 },
             )
         )

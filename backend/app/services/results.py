@@ -23,6 +23,7 @@ from ..repository import Neo4jRepository
 from ..schemas.entity import EntitySummary
 from ..schemas.results import SourceOutcome, SourceResult, SourceResults
 from ..sources import ADAPTER_CLASSES
+from ..utils.activity import activity_status, last_active
 from ..utils.logging import get_logger
 from ..utils.normalization import platform_label
 
@@ -230,6 +231,8 @@ class ResultsService:
             entity=EntitySummary.model_validate(entity),
             identifier=entity.identifier,
             display_name=entity.display_name,
+            activity=activity_status(entity.meta),
+            last_active=last_active(entity.meta),
             url=entity.url,
             confidence=relationship.confidence_level if relationship else None,
             score=relationship.confidence_score if relationship else None,

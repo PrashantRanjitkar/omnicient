@@ -198,6 +198,6 @@ export const api = {
     request<RelationshipDetail>(`/relationships/${id}/reset`, { method: 'POST' }),
 
   /** Download link for an investigation export (section 29). */
-  exportUrl: (id: string, format: 'json' | 'csv' = 'json') =>
+  exportUrl: (id: string, format: 'json' | 'csv' | 'pdf' = 'json') =>
     `${BASE}/investigations/${id}/export?download=true&format=${format}`,
 }

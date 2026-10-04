@@ -5,8 +5,9 @@ from __future__ import annotations
 from enum import StrEnum
 
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
-from fastapi.responses import JSONResponse, PlainTextResponse
+from fastapi.responses import JSONResponse, PlainTextResponse, Response
 
+from ..config import get_settings
 from ..database import get_repository, repository_scope
 from ..models.enums import EntityType
 from ..models.investigation import Investigation
@@ -49,6 +50,7 @@ class ExportFormat(StrEnum):
 
     JSON = "json"
     CSV = "csv"
+    PDF = "pdf"
 
 
 def _get_investigation(repo: Neo4jRepository, investigation_id: str) -> Investigation:
@@ -394,7 +396,7 @@ def list_activity(
 
 @router.get(
     "/{investigation_id}/export",
-    summary="Export an investigation as JSON or CSV",
+    summary="Export an investigation as JSON, CSV or a PDF report",
     # The handler returns either a model or a prepared Response, which FastAPI
     # cannot turn into a single response schema.
     response_model=None,
@@ -403,6 +405,7 @@ def list_activity(
             "content": {
                 "application/json": {},
                 "text/csv": {"schema": {"type": "string"}},
+                "application/pdf": {"schema": {"type": "string", "format": "binary"}},
             }
         }
     },
@@ -413,9 +416,19 @@ def export_investigation(
     download: bool = Query(default=False),
     format: ExportFormat = Query(
         default=ExportFormat.JSON,
-        description="json is the complete record; csv is one row per relationship.",
+        description=(
+            "json is the complete record; csv is one row per relationship; "
+            "pdf is a readable case report."
+        ),
     ),
-) -> InvestigationExport | JSONResponse | PlainTextResponse:
+    mask: bool = Query(
+        default=False,
+        description=(
+            "pdf only: print addresses found in commit metadata as a***@domain "
+            "instead of in full."
+        ),
+    ),
+) -> InvestigationExport | JSONResponse | PlainTextResponse | Response:
     """Export an investigation.
 
     ``json`` carries everything - investigation, entities, relationships,
@@ -426,6 +439,22 @@ def export_investigation(
     investigation = _get_investigation(repo, investigation_id)
     service = InvestigationService(repo)
     stem = f"investigation-{investigation.seed_identifier}-{investigation.id[:8]}"
+
+    if format is ExportFormat.PDF:
+        from ..services.report import render_report
+
+        pdf = render_report(
+            service.export(investigation),
+            ResultsService(repo).build(investigation),
+            get_settings().scoring,
+            mask=mask,
+            pictures=True,
+        )
+        return Response(
+            content=pdf,
+            media_type="application/pdf",
+            headers={"Content-Disposition": f'attachment; filename="{stem}-report.pdf"'},
+        )
 
     if format is ExportFormat.CSV:
         return PlainTextResponse(

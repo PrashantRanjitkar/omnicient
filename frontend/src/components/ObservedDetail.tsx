@@ -28,6 +28,9 @@ const HANDLED_ELSEWHERE = new Set([
   'og_type',
   'intro_location',
   'intro_organizations',
+  'exposed_by',
+  'last_active',
+  'last_active_basis',
 ])
 
 /** Analyst-facing wording for the keys adapters commonly record. */
@@ -52,6 +55,9 @@ const LABELS: Record<string, string> = {
   talking_about: 'Talking about this',
   were_here: 'Were here',
   user_id: 'User id',
+  commit_sample: 'Commits sampled',
+  commit_time_zones: 'Commit time zones',
+  commit_emails_found: 'Commit author addresses',
 }
 
 function humanise(key: string): string {

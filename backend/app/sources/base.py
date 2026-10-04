@@ -132,6 +132,10 @@ class ObservedProfile(BaseModel):
     # Cross-platform accounts this page explicitly points at.
     references: list[Reference] = Field(default_factory=list)
     emails: list[str] = Field(default_factory=list)
+    #: Addresses found in commit metadata rather than published by the
+    #: account. Kept apart from ``emails`` because the person did not choose
+    #: to show them: they are masked on screen and carry their own wording.
+    commit_emails: list[str] = Field(default_factory=list)
     organizations: list[str] = Field(default_factory=list)
     websites: list[str] = Field(default_factory=list)
 
@@ -868,6 +872,18 @@ def _is_own_agent(link: str | None) -> bool:
     if not link:
         return False
     return (normalize_url(link) or link).rstrip("/") in _agent_urls()
+
+
+def activity_fields(value: Any, basis: str) -> dict[str, str]:
+    """``last_active`` and what it was measured by, for a profile's metadata.
+
+    Empty when the platform published nothing readable: an account with no
+    activity date is "unknown", never "dormant".
+    """
+    from ..utils.activity import activity_stamp
+
+    stamp = activity_stamp(value)
+    return {"last_active": stamp, "last_active_basis": basis} if stamp else {}
 
 
 def enrich_profile(profile: ObservedProfile) -> ObservedProfile:

@@ -595,3 +595,16 @@ def domain_belongs_to(domain: str | None, tokens: set[str]) -> bool:
         or (flat.startswith(token) and flat[len(token) :].isdigit() and len(token) >= 4)
         for token in tokens
     )
+
+
+def mask_email(address: str) -> str:
+    """``alice@example.com`` as ``a***@example.com``.
+
+    For addresses the person never chose to publish. The domain stays: it is
+    usually the useful part - an employer, a university - and it is already
+    its own entity in the graph.
+    """
+    local, at, domain = address.partition("@")
+    if not at:
+        return "***"
+    return f"{local[:1]}***@{domain}"

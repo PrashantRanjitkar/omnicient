@@ -222,21 +222,31 @@ def test_a_configured_credential_is_presented_as_the_platform_documents(
 
 async def test_the_credential_reaches_the_platforms_own_endpoint(monkeypatch) -> None:
     monkeypatch.setenv("OMNICIENT_TOKEN_GITHUB", "ghp_example")
-    seen: list[str | None] = []
+    seen: list[tuple[str, str | None]] = []
 
     def handler(request: httpx.Request) -> httpx.Response:
-        seen.append(request.headers.get("authorization"))
+        seen.append((request.url.host, request.headers.get("authorization")))
+        if request.url.path.endswith("/repos"):
+            body: object = [{"name": "hello", "fork": False, "size": 1}]
+        elif request.url.path.endswith("/commits"):
+            body = [{"sha": "abc", "author": {"login": "octocat"}, "commit": {}}]
+        else:
+            body = {"login": "octocat", "type": "User", "html_url": "https://x"}
+        if request.url.path.endswith(".patch"):
+            return httpx.Response(200, text="Date: Mon, 14 Sep 2026 15:16:48 +0200\n")
         return httpx.Response(
-            200,
-            json={"login": "octocat", "type": "User", "html_url": "https://x"},
-            headers={"content-type": "application/json"},
+            200, json=body, headers={"content-type": "application/json"}
         )
 
     f = fetcher(handler)
     await GitHubAdapter(f).lookup("octocat")
     await f.aclose()
 
-    assert seen == ["Bearer ghp_example"]
+    api = [auth for host, auth in seen if host == "api.github.com"]
+    assert api and all(auth == "Bearer ghp_example" for auth in api)
+    # The commit-sampling patch views are github.com, not the API: the
+    # token is for the API alone and is never sent there.
+    assert [auth for host, auth in seen if host == "github.com"] == [None]
 
 
 def test_a_credential_is_never_written_into_a_log_line(monkeypatch) -> None:

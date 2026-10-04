@@ -23,7 +23,12 @@ from dataclasses import dataclass, field
 from ..models.enums import DiscoveryMethod, EntityType
 from ..sources.base import ObservedProfile
 from ..utils.logging import get_logger
-from ..utils.normalization import identity_key, normalize_domain, username_variants
+from ..utils.normalization import (
+    identity_key,
+    mask_email,
+    normalize_domain,
+    username_variants,
+)
 from ..utils.url_parser import website_identity
 
 logger = get_logger(__name__)
@@ -59,6 +64,10 @@ class Candidate:
     #: ``(:Username)`` pivot with no profile of its own, so the accounts found
     #: for it are what handle-variant expansion has to work from.
     seed_equivalent: bool = False
+    #: Where a value the person did not publish was exposed - for now only
+    #: ``"commit_metadata"``. Such entities are shown masked, and nothing
+    #: written about them repeats the value.
+    exposure: str | None = None
 
     @property
     def key(self) -> EntityKey:
@@ -78,6 +87,9 @@ class DiscoveryResult:
     def extend(self, others: list[Candidate]) -> None:
         self.candidates.extend(others)
 
+
+#: The one place an unpublished value is exposed today: git author metadata.
+COMMIT_METADATA = "commit_metadata"
 
 #: Seed platforms that are not accounts.
 SEED_ENTITY_TYPES: dict[str, EntityType] = {
@@ -296,6 +308,23 @@ def candidates_from_profile(
             )
         )
 
+    for address in profile.commit_emails:
+        candidates.append(
+            Candidate(
+                entity_type=EntityType.EMAIL,
+                platform="email",
+                identifier=address,
+                method=method,
+                reason=f"Author address on public commits by {profile.label}",
+                depth=depth,
+                url=None,
+                parent_key=parent_key,
+                link_context="author address on public commits",
+                display_name=mask_email(address),
+                exposure=COMMIT_METADATA,
+            )
+        )
+
     for organization in profile.organizations:
         candidates.append(
             Candidate(
@@ -365,7 +394,9 @@ def similarity_candidates(
     return candidates
 
 
-def email_domain_candidate(address: str, *, depth: int, parent_key: EntityKey) -> Candidate | None:
+def email_domain_candidate(
+    address: str, *, depth: int, parent_key: EntityKey, exposed: bool = False
+) -> Candidate | None:
     """The domain half of a public email address, as a pivot entity."""
     domain = normalize_domain(address.split("@")[-1]) if "@" in address else None
     if not domain:
@@ -375,9 +406,13 @@ def email_domain_candidate(address: str, *, depth: int, parent_key: EntityKey) -
         platform="domain",
         identifier=domain,
         method=DiscoveryMethod.INDIRECT,
-        reason=f"Domain of the public email address {address}",
+        reason=(
+            f"Domain of an author address on public commits ({mask_email(address)})"
+            if exposed
+            else f"Domain of the public email address {address}"
+        ),
         depth=depth,
         url=f"https://{domain}",
         parent_key=parent_key,
-        link_context=address,
+        link_context=mask_email(address) if exposed else address,
     )

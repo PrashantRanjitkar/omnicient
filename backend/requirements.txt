@@ -27,3 +27,8 @@ python-dotenv==1.2.3
 # which would have silently disabled avatar matching the moment anyone split
 # this file the obvious way.
 Pillow==12.3.0
+
+# The PDF case report (app/services/report.py). Pure Python, so the image
+# needs no system libraries for it - only a Unicode font, installed in the
+# Dockerfile.
+reportlab==5.0.1

@@ -28,6 +28,7 @@ const DEFAULT_FILTERS: FilterState = {
   confidenceLevels: new Set<ConfidenceLevel>([...CONFIDENCE_ORDER, 'INSUFFICIENT']),
   showUnassociated: true,
   showDifferentIdentity: true,
+  activity: new Set(['ACTIVE', 'DORMANT', 'UNKNOWN']),
 }
 
 const RUNNING = ['CREATED', 'CRAWLING', 'ANALYZING']

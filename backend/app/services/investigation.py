@@ -39,9 +39,9 @@ from ..schemas.investigation import (
 )
 from ..sources import SourceRegistry, build_registry
 from ..sources.base import SafeFetcher
-from ..utils.identifier import detect_identifier
+from ..utils.identifier import IdentifierType, detect_identifier
 from ..utils.logging import get_logger
-from ..utils.normalization import platform_label
+from ..utils.normalization import NormalizationError, platform_label
 from .alias_detection import AliasCandidate, AliasDetector, normalize_alias_candidate
 from .avatars import AvatarHasher
 from .correlation import CorrelationEngine, CorrelationResult
@@ -95,10 +95,18 @@ class InvestigationService:
         from an explicit override.
         """
         # detect_identifier is the validation: it enforces length, rejects
-        # empty and unrecognized input, and refuses non-HTTP schemes.  Running
-        # a username normalizer first would reject valid email seeds.
+        # empty and unrecognized input, and refuses non-HTTP schemes.
         detected = detect_identifier(payload.identifier)
         platform = payload.platform or detected.seed_platform
+        # An email address is not a starting point. Detection still
+        # recognises one, so the analyst is told why rather than being told
+        # the input is unrecognised. Addresses found *during* a crawl - on a
+        # profile, in commit metadata - are still followed and shown.
+        if detected.type is IdentifierType.EMAIL or platform == "email":
+            raise NormalizationError(
+                "Searching by email address is not supported. Start from a "
+                "username, profile URL or domain."
+            )
         identifier = detected.identifier
         demo = self.settings.demo_mode if payload.demo is None else payload.demo
         investigation = Investigation(
@@ -488,6 +496,8 @@ class InvestigationService:
             }
         elif investigation.demo:
             entity.meta = {"demo": True, "notice": "DEMO DATA"}
+        if observed.exposure is not None:
+            entity.meta = {**(entity.meta or {}), "exposed_by": observed.exposure}
 
         return self.repo.upsert_entity(entity)
 

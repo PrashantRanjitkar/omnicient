@@ -55,6 +55,9 @@ class ObservedEntity:
     discovered_via: str | None = None
     resolved: bool = False
     is_seed: bool = False
+    #: Set when the value was exposed rather than published; see
+    #: :attr:`Candidate.exposure`.
+    exposure: str | None = None
 
     @property
     def label(self) -> str:
@@ -317,6 +320,7 @@ class Crawler:
                 except Exception:  # noqa: BLE001 - reporting must not end a crawl
                     logger.warning("progress_callback_failed", exc_info=True)
 
+        self._unmask_published(outcome)
         self._attach_email_domains(outcome)
         self._record(
             outcome,
@@ -480,6 +484,7 @@ class Crawler:
             discovered_via=candidate.reason,
             resolved=(profile is not None) if resolved is None else resolved,
             is_seed=candidate.method is DiscoveryMethod.SEED,
+            exposure=candidate.exposure,
         )
         outcome.entities[entity.key] = entity
         return entity
@@ -531,6 +536,32 @@ class Crawler:
             return
 
         relationship_type, evidence_type, weight = self._structural_edge(target)
+        if candidate.exposure is not None:
+            # Same weight as a published address - GitHub only attributes a
+            # commit to an account for an address registered on it - but
+            # worded so the value itself is never written into evidence.
+            outcome.links.append(
+                ObservedLink(
+                    source_key=candidate.parent_key,
+                    target_key=candidate.key,
+                    relationship_type=relationship_type,
+                    evidence_type=evidence_type,
+                    description=(
+                        f"Public commits by {parent.label} carry the author address "
+                        f"{target.name}, and GitHub attributes them to this account"
+                    ),
+                    weight=weight,
+                    source_url=parent.url,
+                    extracted_value=target.name,
+                )
+            )
+            self._record(
+                outcome,
+                "relationship_created",
+                f"{parent.label} -> {target.name} ({relationship_type}, commit metadata)",
+                type=str(relationship_type),
+            )
+            return
         outcome.links.append(
             ObservedLink(
                 source_key=candidate.parent_key,
@@ -538,7 +569,7 @@ class Crawler:
                 relationship_type=relationship_type,
                 evidence_type=evidence_type,
                 description=(
-                    f"{parent.label} publicly references {target.label}: "
+                    f"{_shown(parent)} publicly references {_shown(target)}: "
                     f"{candidate.link_context or candidate.reason}"
                 ),
                 weight=weight,
@@ -549,7 +580,7 @@ class Crawler:
         self._record(
             outcome,
             "relationship_created",
-            f"{parent.label} -> {target.label} ({relationship_type})",
+            f"{_shown(parent)} -> {_shown(target)} ({relationship_type})",
             type=str(relationship_type),
         )
 
@@ -589,6 +620,28 @@ class Crawler:
             return RelationshipType.REFERENCES, EvidenceType.SAME_WEBSITE, scoring.shared_website
         return RelationshipType.LINKS_TO, EvidenceType.EXPLICIT_LINK, scoring.explicit_link
 
+    @staticmethod
+    def _unmask_published(outcome: CrawlOutcome) -> None:
+        """Drop the mask from an exposed address some profile also publishes.
+
+        The mask exists because the person did not choose to show the value.
+        If their Gravatar lists it anyway, they did - and hiding an address
+        that the profile panel can cite from a public page helps nobody.
+        Text already written about it stays masked, which costs nothing.
+        """
+        published: set[str] = set()
+        for entity in outcome.entities.values():
+            profile = entity.profile
+            if profile is None:
+                continue
+            published.update(address.lower() for address in profile.emails)
+            if profile.email:
+                published.add(profile.email.lower())
+        for entity in outcome.entities.values():
+            if entity.exposure is not None and entity.identifier.lower() in published:
+                entity.exposure = None
+                entity.name = entity.identifier
+
     def _attach_email_domains(self, outcome: CrawlOutcome) -> None:
         """Give every discovered email address its domain as a pivot entity.
 
@@ -603,8 +656,12 @@ class Crawler:
         for entity in list(outcome.entities.values()):
             if entity.entity_type is not EntityType.EMAIL:
                 continue
+            exposed = entity.exposure is not None
             candidate = email_domain_candidate(
-                entity.identifier, depth=entity.depth + 1, parent_key=entity.key
+                entity.identifier,
+                depth=entity.depth + 1,
+                parent_key=entity.key,
+                exposed=exposed,
             )
             if candidate is None:
                 continue
@@ -619,8 +676,9 @@ class Crawler:
                         relationship_type=RelationshipType.REFERENCES,
                         evidence_type=EvidenceType.SAME_WEBSITE,
                         description=(
-                            f"The public email address {entity.identifier} uses the "
-                            f"domain of {website.identifier}"
+                            f"The {'commit author' if exposed else 'public email'} "
+                            f"address {entity.name if exposed else entity.identifier} "
+                            f"uses the domain of {website.identifier}"
                         ),
                         weight=self.settings.scoring.shared_website,
                         extracted_value=candidate.identifier,
@@ -654,3 +712,8 @@ class Crawler:
         outcome.events.append(
             CrawlEventRecord(event=event, message=message, level=level, data=fields or None)
         )
+
+
+def _shown(entity: ObservedEntity) -> str:
+    """How an entity is named in evidence text: masked when it was exposed."""
+    return entity.name if entity.exposure is not None else entity.label

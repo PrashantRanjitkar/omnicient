@@ -19,6 +19,7 @@ import Avatar from './Avatar'
 import PlatformLogo from './PlatformLogo'
 import type { SourceOutcome, SourceResult, SourceResults } from '../types'
 import {
+  activityText,
   CATEGORY_LABEL,
   CONFIDENCE_COLOR,
   CONFIDENCE_LABEL,
@@ -151,6 +152,15 @@ function ResultRow({
           >
             {result.identifier}
           </button>
+        )}
+
+        {result.activity === 'DORMANT' && (
+          <span
+            className="shrink-0 font-mono text-[9px] uppercase tracking-wide text-faint"
+            title={activityText(result.activity, result.last_active) ?? undefined}
+          >
+            dormant
+          </span>
         )}
 
         <span className="ml-auto shrink-0 font-mono text-[9px] uppercase tracking-wide text-faint">

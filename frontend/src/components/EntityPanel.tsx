@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react'
 import { api } from '../api/client'
 import type { EntityDetail, EntityRelationship } from '../types'
 import {
+  activityText,
   CONFIDENCE_COLOR,
   DISCOVERY_LABEL,
   formatDate,
@@ -145,9 +146,13 @@ export default function EntityPanel({
   const [entity, setEntity] = useState<EntityDetail | null>(null)
   const [relationships, setRelationships] = useState<EntityRelationship[]>([])
   const [error, setError] = useState<string | null>(null)
+  // Per entity, never remembered: a revealed address re-masks as soon as
+  // the analyst moves on.
+  const [revealed, setRevealed] = useState(false)
 
   useEffect(() => {
     let active = true
+    setRevealed(false)
     setEntity(null)
     setError(null)
     Promise.all([api.getEntity(entityId), api.getEntityRelationships(entityId)])
@@ -166,6 +171,7 @@ export default function EntityPanel({
   if (!entity) return <div className="p-4 text-[12px] text-faint">Loading entity…</div>
 
   const isDemo = entity.metadata?.notice === 'DEMO DATA'
+  const exposed = entity.metadata?.exposed_by === 'commit_metadata'
 
   /*
    * flex-1, not h-full. This panel is a flex child of the inspector section,
@@ -195,7 +201,9 @@ export default function EntityPanel({
             <div className="mt-0.5 truncate text-[13px] text-dim">
               {entity.platform_name}
             </div>
-            <div className="truncate font-mono text-[15px] text-ink">{entity.name}</div>
+            <div className="truncate font-mono text-[15px] text-ink">
+              {exposed && revealed ? entity.identifier : entity.name}
+            </div>
             {entity.display_name && entity.display_name !== entity.name && (
               <div className="truncate text-[12px] text-dim">
                 {entity.display_name}
@@ -221,6 +229,20 @@ export default function EntityPanel({
           <div className="rounded border border-line bg-raised px-2 py-1 text-[11px] text-faint">
             Unresolved candidate: this account was referenced publicly, but no
             public profile could be read for it.
+          </div>
+        )}
+
+        {exposed && (
+          <div className="rounded border border-line bg-raised px-2 py-1.5 text-[11px] leading-snug text-dim">
+            Found in the author field of public commits, not published on any
+            profile. Most people do not know their commits show it, so it is
+            masked by default.{' '}
+            <button
+              onClick={() => setRevealed((shown) => !shown)}
+              className="font-mono text-accent hover:underline"
+            >
+              {revealed ? 'Mask it' : 'Reveal'}
+            </button>
           </div>
         )}
 
@@ -289,6 +311,21 @@ export default function EntityPanel({
             <div className="mt-0.5 text-[11px] text-faint">{entity.discovered_via}</div>
           )}
         </Field>
+
+        {entity.type === 'ACCOUNT' && entity.resolved && (
+          <Field label="Public activity">
+            {activityText(entity.activity, entity.last_active) ?? (
+              <span className="text-faint">
+                {entity.platform_name} does not publish when the account was last used.
+              </span>
+            )}
+            {typeof entity.metadata?.last_active_basis === 'string' && (
+              <div className="mt-0.5 text-[11px] text-faint">
+                Measured by the {entity.metadata.last_active_basis}.
+              </div>
+            )}
+          </Field>
+        )}
 
         <div className="grid grid-cols-2 gap-3">
           <Field label="First seen">{formatDate(entity.first_seen)}</Field>

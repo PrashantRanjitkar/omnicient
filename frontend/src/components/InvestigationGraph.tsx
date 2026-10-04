@@ -407,6 +407,9 @@ export default function InvestigationGraph({
               node.analyst_verdict !== 'DIFFERENT_IDENTITY' ||
               filters.showDifferentIdentity,
           )
+          // The seed stays whatever its activity: hiding the root would
+          // orphan everything hanging from it.
+          .filter((node) => node.is_seed || filters.activity.has(node.activity))
           .map((node) => node.id),
       ),
     [
@@ -415,6 +418,7 @@ export default function InvestigationGraph({
       filters.confidenceLevels,
       filters.showUnassociated,
       filters.showDifferentIdentity,
+      filters.activity,
     ],
   )
 

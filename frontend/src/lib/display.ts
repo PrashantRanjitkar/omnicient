@@ -6,6 +6,7 @@
  */
 
 import type {
+  ActivityStatus,
   ConfidenceLevel,
   AnalystStatus,
   EntityType,
@@ -102,6 +103,21 @@ export const DISCOVERY_LABEL: Record<string, string> = {
   INDIRECT: 'Discovered through another entity',
   SIMILARITY: 'Weak lead: similar handle',
   DEMO: 'Demo dataset',
+}
+
+/** "No public activity since Mar 2021" and friends, in one wording. */
+export function activityText(
+  activity: ActivityStatus,
+  lastActive: string | null,
+): string | null {
+  if (activity === 'UNKNOWN' || !lastActive) return null
+  const when = new Date(lastActive).toLocaleDateString(undefined, {
+    month: 'short',
+    year: 'numeric',
+  })
+  return activity === 'DORMANT'
+    ? `No public activity since ${when}`
+    : `Active · last seen ${when}`
 }
 
 export function formatDate(value: string | null | undefined): string {

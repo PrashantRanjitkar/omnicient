@@ -1,6 +1,6 @@
 """Identifier detection: work out what the analyst typed.
 
-Omnicient asks for one thing - "username, email, profile URL, or domain" - and
+Omnicient asks for one thing - "username, profile URL, or domain" - and
 never for a platform (section 3.2).  This module is the layer that makes that
 possible: it classifies the raw input, and where the input already names a
 platform (a profile URL) it extracts that too.
@@ -13,7 +13,8 @@ platform (a profile URL) it extracts that too.
     <IdentifierType.DOMAIN: 'DOMAIN'>
 
 Detection is deliberately conservative and ordered most-specific first: an
-email is unambiguous, a recognized profile URL names its own platform, and a
+email is unambiguous (and recognised only so it can be refused by name - it
+is not a supported starting point), a recognized profile URL names its own platform, and a
 bare word with no dot and no scheme is a username.  Anything that matches
 nothing raises :class:`~app.utils.normalization.NormalizationError` rather than
 being guessed at, because a wrong guess sends the crawler somewhere useless.
@@ -162,7 +163,7 @@ def detect_identifier(value: str | None) -> DetectedIdentifier:
         )
 
     raise NormalizationError(
-        f"{raw!r} is not a recognized username, email address, profile URL or domain"
+        f"{raw!r} is not a recognized username, profile URL or domain"
     )
 
 
