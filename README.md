@@ -11,11 +11,11 @@ Omnicient starts from a single public identifier — a username, a profile link 
 - **Evidence, not verdicts** — every connection lists what was observed and the page it came from
 - **Explainable scoring** — simple weighted rules, measured against labelled real-world pairs
 - **Avatar matching** — recognises the same profile photo across platforms
-- **Commit metadata** — samples a GitHub account's public commits for author addresses (masked by default) and the time zones they were made in
+- **Commit metadata** — samples a GitHub account's public commits for author addresses (masked on screen until revealed) and the time zones they were made in
 - **Account activity** — flags accounts with no public activity in two years, where the source publishes it
 - **Graph view** — the investigation laid out as a tree from the starting identifier
 - **Analyst review** — confirm or reject connections, rule out namesakes, draw links by hand; nothing is ever deleted
-- **Export** — a PDF case report, plus JSON and CSV
+- **Export** — a short, plain-language PDF report with profile pictures, plus JSON and CSV for the full record
 
 ## Tech stack
 
